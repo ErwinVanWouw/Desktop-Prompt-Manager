@@ -1,0 +1,1174 @@
+"""
+Prompt Manager (desktop edition)
+--------------------------------
+A local, cross-platform tray app that inserts up to 10 custom prompts into any
+focused application (Claude Desktop, ChatGPT Desktop, or anything else) using
+global keyboard shortcuts.
+
+Default trigger scheme (each shortcut is customizable in Settings):
+    Ctrl+Shift+1 .. Ctrl+Shift+9  -> prompt 1 .. 9
+    Ctrl+Shift+0                  -> prompt 10
+
+How it works: on a hotkey it copies the stored prompt to the clipboard and
+simulates a paste (Ctrl+V, or Cmd+V on macOS) into whatever window is focused.
+This mirrors the behaviour of the original browser extension without needing
+any per-site DOM selectors.
+
+Extras beyond the extension:
+  * one-action instructing — optionally append the text you just copied after
+    the prompt, so "copy + shortcut" inserts e.g. "Translate: <copied text>";
+  * a password safety net — warns before pasting copied text that looks like a
+    password, API key or token.
+
+Dependencies:  pip install pynput pyperclip pystray pillow
+"""
+
+import os
+import re
+import sys
+import json
+import threading
+import time
+import webbrowser
+import urllib.request
+
+import tkinter as tk
+from tkinter import messagebox, ttk
+
+import pyperclip
+from pynput import keyboard
+import pystray
+from PIL import Image, ImageDraw, ImageTk
+
+# --------------------------------------------------------------------------- #
+# Configuration / storage
+# --------------------------------------------------------------------------- #
+
+APP_NAME = "PromptManager"
+APP_TITLE = "Prompt Manager for Translators"
+APP_VERSION = "1.0.0"
+APP_AUTHOR = "Black Kite"
+APP_LICENSE = "GNU General Public License v3"
+APP_DESCRIPTION = (
+    "A local tray app that inserts up to 10 custom prompts into any focused "
+    "application — such as Claude Desktop and ChatGPT Desktop — using global "
+    "keyboard shortcuts."
+)
+
+# --- Update check -----------------------------------------------------------
+# SET THESE to your own URLs. VERSION_CHECK_URL must point to a plain-text file
+# that contains only the latest version number (e.g. "1.2.0"). GITHUB_URL is
+# where users are sent to download a newer version.
+VERSION_CHECK_URL = "https://raw.githubusercontent.com/black-kite/prompt-manager/main/VERSION"
+GITHUB_URL = "https://github.com/black-kite/prompt-manager"
+
+NUM_PROMPTS = 10  # prompt1 .. prompt10
+
+DEFAULT_PROMPTS = {
+    "prompt1": "Rephrase: ",
+    "prompt2": "Correct: ",
+    "prompt3": "Translate: ",
+    "prompt4": "Give 3 equivalents for: ",
+    "prompt5": "",
+    "prompt6": "",
+    "prompt7": "",
+    "prompt8": "",
+    "prompt9": "",
+    "prompt10": "",
+}
+
+# Default hotkeys in pynput format (e.g. "<ctrl>+<shift>+3").
+DEFAULT_SHORTCUTS = {f"prompt{i}": f"<ctrl>+<shift>+{i}" for i in range(1, 10)}
+DEFAULT_SHORTCUTS["prompt10"] = "<ctrl>+<shift>+0"
+
+# Modifier presets offered in the Settings dropdown -> pynput tokens.
+MODIFIER_PRESETS = {
+    "Ctrl+Shift": ["<ctrl>", "<shift>"],
+    "Ctrl+Alt": ["<ctrl>", "<alt>"],
+    "Ctrl": ["<ctrl>"],
+    "Alt+Shift": ["<alt>", "<shift>"],
+    "Alt": ["<alt>"],
+    "Ctrl+Shift+Alt": ["<ctrl>", "<shift>", "<alt>"],
+}
+
+# Keys offered in the Settings dropdown: 0-9, A-Z, F1-F12.
+KEY_CHOICES = (
+    [str(d) for d in range(10)]
+    + [chr(c) for c in range(ord("A"), ord("Z") + 1)]
+    + [f"F{n}" for n in range(1, 13)]
+)
+
+
+def key_display_to_token(display: str) -> str:
+    """'3' -> '3', 'A' -> 'a', 'F1' -> '<f1>' (pynput hotkey token)."""
+    if re.fullmatch(r"[Ff]\d{1,2}", display):
+        return f"<{display.lower()}>"
+    return display.lower()
+
+
+def key_token_to_display(token: str) -> str:
+    """Inverse of key_display_to_token."""
+    m = re.fullmatch(r"<(f\d{1,2})>", token)
+    if m:
+        return m.group(1).upper()
+    return token.upper()
+
+
+def combo_to_parts(combo: str):
+    """Split a pynput combo into (modifier tokens set, key token)."""
+    tokens = [t.strip() for t in combo.split("+") if t.strip()]
+    mods, key = [], ""
+    for t in tokens:
+        if t in ("<ctrl>", "<shift>", "<alt>", "<cmd>"):
+            mods.append(t)
+        else:
+            key = t
+    return mods, key
+
+
+def combo_to_human(combo: str) -> str:
+    """'<ctrl>+<shift>+3' -> 'Ctrl+Shift+3'."""
+    mods, key = combo_to_parts(combo)
+    names = {"<ctrl>": "Ctrl", "<shift>": "Shift", "<alt>": "Alt", "<cmd>": "Cmd"}
+    parts = [names.get(m, m) for m in mods]
+    if key:
+        parts.append(key_token_to_display(key))
+    return "+".join(parts)
+
+
+def parts_to_combo(mod_tokens, key_token: str) -> str:
+    """Build a pynput combo string from modifier tokens and a key token."""
+    return "+".join(list(mod_tokens) + [key_token])
+
+
+def modtokens_to_label(mod_tokens):
+    """Find the preset label matching a set of modifier tokens, else None."""
+    want = set(mod_tokens)
+    for label, toks in MODIFIER_PRESETS.items():
+        if set(toks) == want:
+            return label
+    return None
+
+# Colour scheme mirrored from the original extension's css/styles.css.
+COL_BG = "#f5f5f5"       # page background
+COL_FG = "#656565"       # grey text
+COL_YELLOW = "#ffd401"   # accent (intro box, Save button)
+COL_WHITE = "#ffffff"
+COL_BORDER = "#dddddd"   # input border
+COL_FOCUS = "#667eea"    # input focus border
+COL_SEP = "#e0e0e0"      # header separator
+COL_INPUT_TEXT = "#000000"
+UI_FONT = "Arial"
+
+
+def config_dir() -> str:
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    elif sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Application Support")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, APP_NAME)
+
+
+def config_path() -> str:
+    return os.path.join(config_dir(), "prompts.json")
+
+
+def _read_raw() -> dict:
+    """Return the raw JSON dict from disk (prompts + settings), or {}."""
+    try:
+        with open(config_path(), "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, dict):
+            return data
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
+def load_config() -> dict:
+    """Read prompts from disk, falling back to defaults for missing keys."""
+    raw = _read_raw()
+    prompts = dict(DEFAULT_PROMPTS)
+    for key in DEFAULT_PROMPTS:
+        if isinstance(raw.get(key), str):
+            prompts[key] = raw[key]
+    return prompts
+
+
+def get_append_clipboard() -> bool:
+    """Whether copied clipboard text is appended after the prompt (default on)."""
+    return bool(_read_raw().get("append_clipboard", True))
+
+
+def get_password_warning() -> bool:
+    """Whether to warn before pasting text that looks like a password (default on)."""
+    return bool(_read_raw().get("password_warning", True))
+
+
+def get_shortcuts() -> dict:
+    """Return {prompt_key: pynput combo}, falling back to defaults."""
+    raw = _read_raw().get("shortcuts", {})
+    shortcuts = dict(DEFAULT_SHORTCUTS)
+    if isinstance(raw, dict):
+        for key in DEFAULT_SHORTCUTS:
+            if isinstance(raw.get(key), str) and raw[key].strip():
+                shortcuts[key] = raw[key].strip()
+    return shortcuts
+
+
+def save_config(prompts: dict, append_clipboard=None, shortcuts=None,
+                password_warning=None) -> None:
+    """Persist prompts and optional settings, preserving other keys in the file."""
+    raw = _read_raw()
+    raw.update(prompts)
+    if append_clipboard is not None:
+        raw["append_clipboard"] = bool(append_clipboard)
+    if password_warning is not None:
+        raw["password_warning"] = bool(password_warning)
+    if shortcuts is not None:
+        raw["shortcuts"] = shortcuts
+    os.makedirs(config_dir(), exist_ok=True)
+    with open(config_path(), "w", encoding="utf-8") as fh:
+        json.dump(raw, fh, ensure_ascii=False, indent=2)
+
+
+# --------------------------------------------------------------------------- #
+# Prompt insertion (clipboard + simulated paste)
+# --------------------------------------------------------------------------- #
+
+_kbd = keyboard.Controller()
+
+# Set by the GUI so a background paste can ask the user for confirmation.
+# Signature: confirm(masked_preview: str) -> bool. None means "no GUI, allow".
+_confirm_hook = None
+
+_URL_RE = re.compile(r"^(https?://|www\.)", re.IGNORECASE)
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def set_confirm_hook(func) -> None:
+    global _confirm_hook
+    _confirm_hook = func
+
+
+def _get_foreground_window():
+    """Handle of the currently focused window (Windows only, else None)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            return ctypes.windll.user32.GetForegroundWindow()
+        except Exception:
+            return None
+    return None
+
+
+def _focus_window(hwnd) -> None:
+    """Best-effort: return keyboard focus to a window after a dialog stole it.
+
+    Needed because the password-confirmation dialog takes focus away from the
+    target app; without this the subsequent paste would go nowhere. Windows
+    only — a no-op on other platforms.
+    """
+    if sys.platform != "win32" or not hwnd:
+        return
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        cur = kernel32.GetCurrentThreadId()
+        target = user32.GetWindowThreadProcessId(hwnd, None)
+        # Attaching input queues lets us hand foreground back reliably.
+        user32.AttachThreadInput(cur, target, True)
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+        user32.AttachThreadInput(cur, target, False)
+    except Exception:
+        pass
+
+
+def looks_like_password(s: str) -> bool:
+    """Heuristic: does this single token look like a password/secret/API key?
+
+    Deliberately conservative to avoid flagging normal text: anything with
+    whitespace (sentences), URLs and e-mail addresses are never flagged.
+    """
+    s = s.strip()
+    if not s or any(c.isspace() for c in s):
+        return False
+    if len(s) < 6 or len(s) > 200:
+        return False
+    if _URL_RE.search(s) or _EMAIL_RE.match(s):
+        return False
+
+    has_lower = any(c.islower() for c in s)
+    has_upper = any(c.isupper() for c in s)
+    has_digit = any(c.isdigit() for c in s)
+    has_symbol = any(not c.isalnum() for c in s)
+    classes = sum([has_lower, has_upper, has_digit, has_symbol])
+
+    # 3+ character classes -> strong signal (e.g. "Tr0ub4dour&3").
+    if classes >= 3:
+        return True
+    # letters + digits mixed in a longish token -> likely a token/password
+    # (e.g. "hunter2Password", camelCase with a number).
+    if has_digit and (has_lower or has_upper) and len(s) >= 8:
+        return True
+    return False
+
+
+def mask_secret(s: str) -> str:
+    """Show enough to recognise it without exposing the whole secret."""
+    s = s.strip()
+    n = len(s)
+    if n <= 4:
+        shown = s[:1] + "•" * (n - 1)
+    else:
+        shown = s[:2] + "•" * min(n - 4, 12) + s[-2:]
+    return f"{shown}   ({n} characters)"
+
+
+def _insert_prompt(text: str, append_clipboard: bool = True,
+                   password_warning: bool = True) -> None:
+    if not text:
+        return
+
+    # Remember which window is focused now (the target app), before any dialog
+    # can steal focus, so we can hand it back before pasting.
+    target_hwnd = _get_foreground_window()
+    refocus = False
+
+    # Read whatever the user just copied, so we can instruct in one action:
+    # e.g. copy a sentence, press Ctrl+Shift+3, get "Translate: <that sentence>".
+    try:
+        original = pyperclip.paste()
+        if not isinstance(original, str):
+            original = ""
+    except Exception:
+        original = ""
+
+    # If we're about to paste copied clipboard text and it looks like a
+    # password/secret, ask the user before it leaves the clipboard.
+    if append_clipboard and password_warning and looks_like_password(original):
+        if _confirm_hook is not None:
+            if not _confirm_hook(mask_secret(original)):
+                return  # user declined; clipboard is left untouched
+            refocus = True  # the dialog stole focus from the target app
+
+    combined = text + original if append_clipboard else text
+    pyperclip.copy(combined)
+    # Give the clipboard a moment to settle.
+    time.sleep(0.03)
+
+    # The hotkey modifiers (Ctrl+Shift) are still physically held when the
+    # callback fires. Release them so our simulated shortcuts aren't mangled.
+    for key in (
+        keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r,
+        keyboard.Key.shift, keyboard.Key.shift_r,
+    ):
+        try:
+            _kbd.release(key)
+        except Exception:
+            pass
+
+    time.sleep(0.03)
+
+    # If a confirmation dialog was shown, focus moved away from the target app;
+    # hand it back before we paste, otherwise the paste goes nowhere.
+    if refocus:
+        _focus_window(target_hwnd)
+        time.sleep(0.15)
+
+    # macOS uses Cmd for both select-all and paste; other platforms use Ctrl.
+    mod = keyboard.Key.cmd if sys.platform == "darwin" else keyboard.Key.ctrl
+
+    # Select existing content first so a new prompt REPLACES whatever is there
+    # (mirrors the original extension's selectAll-then-insert behaviour). This
+    # means picking the wrong shortcut simply overwrites it instead of
+    # appending.
+    with _kbd.pressed(mod):
+        _kbd.press("a")
+        _kbd.release("a")
+    time.sleep(0.02)
+
+    with _kbd.pressed(mod):
+        _kbd.press("v")
+        _kbd.release("v")
+
+    # Restore the user's original clipboard so repeated triggers stay clean
+    # (otherwise the next trigger would append the combined text to itself).
+    time.sleep(0.15)
+    try:
+        pyperclip.copy(original)
+    except Exception:
+        pass
+
+
+def trigger(prompt_key: str) -> None:
+    """Look up the prompt fresh (so edits apply live) and insert it."""
+    prompts = load_config()
+    text = prompts.get(prompt_key, "")
+    append = get_append_clipboard()
+    warn = get_password_warning()
+    # Run the paste off the listener thread so we never block hotkey handling.
+    threading.Thread(target=_insert_prompt, args=(text, append, warn),
+                     daemon=True).start()
+
+
+def build_hotkeys() -> keyboard.GlobalHotKeys:
+    """Build the global hotkey listener from the user's configured shortcuts."""
+    mapping = {}
+    for key, combo in get_shortcuts().items():
+        if not combo:
+            continue
+        try:
+            keyboard.HotKey.parse(combo)  # validate; skip broken combos
+        except ValueError:
+            continue
+        mapping[combo] = (lambda k=key: trigger(k))
+    return keyboard.GlobalHotKeys(mapping)
+
+
+# --------------------------------------------------------------------------- #
+# Settings window (Tkinter)
+# --------------------------------------------------------------------------- #
+
+# Intro text mirrored from the original options.html (adapted for 10 prompts
+# and the desktop shortcut scheme).
+INTRO_PARA_1 = (
+    "The first 4 prompts come pre-configured for translators and text editors, "
+    "but can be fully customized. Prompts 5 to 10 are empty by default, but you "
+    "can customize them as needed. Enter your prompt in the fields below; the "
+    "shortcut for each prompt is shown next to it."
+)
+INTRO_PARA_2 = (
+    "By default you trigger each prompt with Ctrl+Shift+# (e.g. Ctrl+Shift+1 for "
+    "Prompt 1) and Ctrl+Shift+0 for Prompt 10. You can change each shortcut with "
+    "the dropdowns next to it. The shortcuts work in any application, including "
+    "Claude Desktop and ChatGPT Desktop."
+)
+SHORTCUT_INSTRUCTIONS = (
+    "Set each prompt's shortcut with the modifier and key dropdowns next to it, "
+    "then click Save Prompts to apply. Changes take effect immediately."
+)
+
+
+class SettingsWindow:
+    def __init__(self, root: tk.Tk, on_shortcuts_changed=None, on_help=None):
+        self.root = root
+        self.on_shortcuts_changed = on_shortcuts_changed
+        self.on_help = on_help
+        self.win = None
+        self.entries = {}
+        self.mod_vars = {}   # prompt_key -> StringVar (modifier preset label)
+        self.key_vars = {}   # prompt_key -> StringVar (key display)
+        self._imgs = []  # keep PhotoImage references alive
+
+    def _logo(self, height: int):
+        """Load the app logo scaled to a given pixel height (aspect-preserving)."""
+        img = Image.open(resource_path("logo.png"))
+        w, h = img.size
+        new_w = max(1, int(round(w * height / h)))
+        photo = ImageTk.PhotoImage(img.resize((new_w, height), Image.LANCZOS))
+        self._imgs.append(photo)
+        return photo
+
+    def show(self):
+        # Only one settings window at a time.
+        if self.win is not None and self.win.winfo_exists():
+            self.win.deiconify()
+            self.win.lift()
+            self.win.focus_force()
+            return
+
+        self._imgs = []
+        self.entries = {}
+        self.mod_vars = {}
+        self.key_vars = {}
+
+        self.win = tk.Toplevel(self.root)
+        self.win.title("Prompt Manager for Translators")
+        self.win.configure(bg=COL_BG)
+        self.win.resizable(False, False)
+        self.win.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # ---- Header (white bar with logo + title, like the original) ---------
+        header = tk.Frame(self.win, bg=COL_WHITE)
+        header.pack(fill="x")
+        head_inner = tk.Frame(header, bg=COL_WHITE)
+        head_inner.pack(anchor="w", padx=20, pady=15)
+
+        try:
+            tk.Label(head_inner, image=self._logo(22), bg=COL_WHITE).pack(side="left",
+                                                                          padx=(0, 8))
+        except Exception:
+            pass
+        tk.Label(head_inner, text="Prompt Manager for Translators", bg=COL_WHITE,
+                 fg=COL_FG, font=(UI_FONT, 13, "bold")).pack(side="left")
+        tk.Label(head_inner, text="–  Easily save, manage, and insert up to 10 "
+                 "custom AI prompts", bg=COL_WHITE, fg=COL_FG,
+                 font=(UI_FONT, 9)).pack(side="left", padx=(6, 0))
+
+        tk.Frame(self.win, height=1, bg=COL_SEP).pack(fill="x")
+
+        # ---- Content ---------------------------------------------------------
+        content = tk.Frame(self.win, bg=COL_BG)
+        content.pack(fill="both", expand=True, padx=30, pady=20)
+
+        tk.Label(content, text="Settings", bg=COL_BG, fg=COL_FG,
+                 font=(UI_FONT, 16, "bold")).pack(anchor="w", pady=(0, 15))
+
+        # Yellow intro box
+        intro = tk.Frame(content, bg=COL_YELLOW)
+        intro.pack(fill="x", pady=(0, 20))
+        intro_inner = tk.Frame(intro, bg=COL_YELLOW)
+        intro_inner.pack(fill="x", padx=15, pady=15)
+        tk.Label(intro_inner, text="Manage your Prompts", bg=COL_YELLOW, fg=COL_FG,
+                 font=(UI_FONT, 13, "bold")).pack(anchor="w", pady=(0, 10))
+        tk.Label(intro_inner, text=INTRO_PARA_1, bg=COL_YELLOW, fg=COL_FG,
+                 font=(UI_FONT, 9), justify="left", wraplength=560).pack(
+                     anchor="w", pady=(0, 8))
+        tk.Label(intro_inner, text=INTRO_PARA_2, bg=COL_YELLOW, fg=COL_FG,
+                 font=(UI_FONT, 9), justify="left", wraplength=560).pack(anchor="w")
+
+        # Form: two columns of five prompts
+        prompts = load_config()
+        shortcuts = get_shortcuts()
+        form = tk.Frame(content, bg=COL_BG)
+        form.pack(fill="x", pady=(5, 0))
+        columns = [
+            tk.Frame(form, bg=COL_BG),
+            tk.Frame(form, bg=COL_BG),
+        ]
+        columns[0].pack(side="left", fill="both", expand=True, padx=(0, 15))
+        columns[1].pack(side="left", fill="both", expand=True, padx=(15, 0))
+
+        for idx in range(NUM_PROMPTS):
+            key = f"prompt{idx + 1}"
+            col = columns[idx // 5]
+
+            # Row 1: "Prompt N" label + shortcut dropdowns (modifier + key)
+            top = tk.Frame(col, bg=COL_BG)
+            top.pack(fill="x", pady=(12, 0))
+            tk.Label(top, text=f"Prompt {idx + 1}:", bg=COL_BG, fg=COL_FG,
+                     font=(UI_FONT, 9, "bold")).pack(side="left")
+
+            mods, key_token = combo_to_parts(shortcuts.get(key, ""))
+            mod_var = tk.StringVar(value=modtokens_to_label(mods) or "Ctrl+Shift")
+            key_var = tk.StringVar(value=key_token_to_display(key_token) if key_token
+                                   else "0")
+            self.mod_vars[key] = mod_var
+            self.key_vars[key] = key_var
+
+            key_cb = ttk.Combobox(top, textvariable=key_var, values=KEY_CHOICES,
+                                  width=4, state="readonly")
+            key_cb.pack(side="right")
+            mod_cb = ttk.Combobox(top, textvariable=mod_var,
+                                  values=list(MODIFIER_PRESETS.keys()), width=13,
+                                  state="readonly")
+            mod_cb.pack(side="right", padx=(0, 4))
+
+            # Row 2: the prompt text entry
+            entry = tk.Entry(col, font=(UI_FONT, 10), bg=COL_WHITE,
+                             fg=COL_INPUT_TEXT, relief="flat", bd=0,
+                             highlightthickness=2, highlightbackground=COL_BORDER,
+                             highlightcolor=COL_FOCUS, insertbackground=COL_INPUT_TEXT)
+            entry.insert(0, prompts.get(key, ""))
+            entry.pack(fill="x", ipady=5, pady=(6, 0))
+            self.entries[key] = entry
+
+        # One-action option: append copied clipboard text after the prompt
+        self.append_var = tk.BooleanVar(value=get_append_clipboard())
+        opt = tk.Frame(content, bg=COL_BG)
+        opt.pack(anchor="w", pady=(18, 0))
+        tk.Checkbutton(
+            opt,
+            text="Append copied text after the prompt (instruct in one action)",
+            variable=self.append_var, bg=COL_BG, fg=COL_FG, font=(UI_FONT, 9),
+            activebackground=COL_BG, activeforeground=COL_FG,
+            selectcolor=COL_WHITE, anchor="w",
+        ).pack(anchor="w")
+        tk.Label(
+            opt,
+            text=("When on: copy a snippet, press a shortcut, and e.g. "
+                  "\"Translate: \" is inserted with your copied text right after it."),
+            bg=COL_BG, fg=COL_FG, font=(UI_FONT, 8), justify="left",
+            wraplength=560,
+        ).pack(anchor="w", padx=(22, 0))
+
+        # Password-safety option: warn before pasting secret-looking clipboard text
+        self.pw_warn_var = tk.BooleanVar(value=get_password_warning())
+        pwopt = tk.Frame(content, bg=COL_BG)
+        pwopt.pack(anchor="w", pady=(10, 0))
+        tk.Checkbutton(
+            pwopt,
+            text="Warn before pasting text that looks like a password or secret",
+            variable=self.pw_warn_var, bg=COL_BG, fg=COL_FG, font=(UI_FONT, 9),
+            activebackground=COL_BG, activeforeground=COL_FG,
+            selectcolor=COL_WHITE, anchor="w",
+        ).pack(anchor="w")
+        tk.Label(
+            pwopt,
+            text=("Safety net for the one-action feature: if your copied text "
+                  "looks like a password, API key or token, you'll be asked to "
+                  "confirm before it is pasted."),
+            bg=COL_BG, fg=COL_FG, font=(UI_FONT, 8), justify="left",
+            wraplength=560,
+        ).pack(anchor="w", padx=(22, 0))
+
+        # Buttons
+        btns = tk.Frame(content, bg=COL_BG)
+        btns.pack(anchor="w", pady=(22, 0))
+        save = tk.Button(btns, text="Save Prompts", command=self._save,
+                         bg=COL_YELLOW, fg=COL_FG, font=(UI_FONT, 10, "bold"),
+                         relief="flat", bd=0, padx=22, pady=9, cursor="hand2",
+                         activebackground=COL_WHITE, activeforeground=COL_YELLOW)
+        save.pack(side="left", padx=(0, 15))
+        reset = tk.Button(btns, text="Reset to Defaults", command=self._reset,
+                          bg=COL_WHITE, fg=COL_FG, font=(UI_FONT, 10, "bold"),
+                          relief="solid", bd=1, padx=22, pady=9, cursor="hand2",
+                          activebackground=COL_YELLOW, activeforeground=COL_WHITE)
+        reset.pack(side="left")
+        self._add_hover(save, COL_YELLOW, COL_FG, COL_WHITE, COL_YELLOW)
+        self._add_hover(reset, COL_WHITE, COL_FG, COL_YELLOW, COL_WHITE)
+        if self.on_help:
+            helpb = tk.Button(btns, text="Help", command=self.on_help,
+                              bg=COL_WHITE, fg=COL_FG, font=(UI_FONT, 10, "bold"),
+                              relief="solid", bd=1, padx=22, pady=9, cursor="hand2",
+                              activebackground=COL_YELLOW, activeforeground=COL_WHITE)
+            helpb.pack(side="left", padx=(15, 0))
+            self._add_hover(helpb, COL_WHITE, COL_FG, COL_YELLOW, COL_WHITE)
+
+        # Bottom white instructions box
+        instr = tk.Frame(content, bg=COL_WHITE)
+        instr.pack(fill="x", pady=(30, 0))
+        instr_inner = tk.Frame(instr, bg=COL_WHITE)
+        instr_inner.pack(fill="x", padx=20, pady=20)
+        row = tk.Frame(instr_inner, bg=COL_WHITE)
+        row.pack(anchor="w")
+        try:
+            tk.Label(row, image=self._logo(14), bg=COL_WHITE).pack(
+                side="left", padx=(0, 6), anchor="n")
+        except Exception:
+            pass
+        tk.Label(row, text=SHORTCUT_INSTRUCTIONS, bg=COL_WHITE, fg=COL_FG,
+                 font=(UI_FONT, 9), justify="left", wraplength=520).pack(side="left")
+
+        self.win.update_idletasks()
+        self.win.lift()
+        self.win.focus_force()
+
+    @staticmethod
+    def _add_hover(widget, bg, fg, hover_bg, hover_fg):
+        widget.bind("<Enter>", lambda e: widget.configure(bg=hover_bg, fg=hover_fg))
+        widget.bind("<Leave>", lambda e: widget.configure(bg=bg, fg=fg))
+
+    def _collect_shortcuts(self):
+        """Build {prompt_key: pynput combo} from the dropdowns."""
+        shortcuts = {}
+        for key in self.entries:
+            mods = MODIFIER_PRESETS.get(self.mod_vars[key].get(), ["<ctrl>", "<shift>"])
+            token = key_display_to_token(self.key_vars[key].get())
+            shortcuts[key] = parts_to_combo(mods, token)
+        return shortcuts
+
+    def _save(self):
+        prompts = {}
+        for key, entry in self.entries.items():
+            prompts[key] = entry.get().strip()
+
+        shortcuts = self._collect_shortcuts()
+
+        # Warn about duplicate shortcuts (only one of them would ever fire).
+        seen, dupes = {}, []
+        for key, combo in shortcuts.items():
+            if combo in seen:
+                dupes.append(combo_to_human(combo))
+            seen[combo] = key
+        if dupes:
+            unique = ", ".join(sorted(set(dupes)))
+            if not messagebox.askyesno(
+                "Prompt Manager – duplicate shortcuts",
+                f"These shortcuts are assigned to more than one prompt: {unique}.\n\n"
+                "Only one prompt per combination will respond. Save anyway?",
+                parent=self.win,
+            ):
+                return
+
+        save_config(prompts, append_clipboard=self.append_var.get(),
+                    shortcuts=shortcuts, password_warning=self.pw_warn_var.get())
+        if self.on_shortcuts_changed:
+            self.on_shortcuts_changed()
+        messagebox.showinfo("Prompt Manager", "✅ Prompts saved.", parent=self.win)
+
+    def _reset(self):
+        for key, entry in self.entries.items():
+            entry.delete(0, tk.END)
+            entry.insert(0, DEFAULT_PROMPTS[key])
+            # Reset the shortcut dropdowns to their defaults too.
+            mods, token = combo_to_parts(DEFAULT_SHORTCUTS[key])
+            self.mod_vars[key].set(modtokens_to_label(mods) or "Ctrl+Shift")
+            self.key_vars[key].set(key_token_to_display(token))
+        self.append_var.set(True)
+        self.pw_warn_var.set(True)
+        save_config(dict(DEFAULT_PROMPTS), append_clipboard=True,
+                    shortcuts=dict(DEFAULT_SHORTCUTS), password_warning=True)
+        if self.on_shortcuts_changed:
+            self.on_shortcuts_changed()
+        messagebox.showinfo(
+            "Prompt Manager", "\U0001F504 Prompts reset to defaults.", parent=self.win
+        )
+
+    def _on_close(self):
+        if self.win is not None:
+            self.win.destroy()
+            self.win = None
+
+
+# --------------------------------------------------------------------------- #
+# Help window (renders the README)
+# --------------------------------------------------------------------------- #
+
+FALLBACK_HELP = (
+    "# Prompt Manager\n\n"
+    "Insert up to 10 custom prompts into any focused app with global shortcuts.\n\n"
+    "## Shortcuts\n"
+    "Default: Ctrl+Shift+1..9 for prompts 1-9, Ctrl+Shift+0 for prompt 10. "
+    "Change them per prompt in Settings.\n\n"
+    "## One-action instructing\n"
+    "Copy a snippet, press a shortcut, and the prompt is inserted with your "
+    "copied text right after it. Toggle in Settings.\n\n"
+    "## Password safety net\n"
+    "Warns before pasting copied text that looks like a password or secret.\n"
+)
+
+
+class HelpWindow:
+    def __init__(self, root: tk.Tk):
+        self.root = root
+        self.win = None
+        self._imgs = []
+
+    def _logo(self, height: int):
+        img = Image.open(resource_path("logo.png"))
+        w, h = img.size
+        new_w = max(1, int(round(w * height / h)))
+        photo = ImageTk.PhotoImage(img.resize((new_w, height), Image.LANCZOS))
+        self._imgs.append(photo)
+        return photo
+
+    @staticmethod
+    def _load_help_text() -> str:
+        try:
+            with open(resource_path("README.md"), "r", encoding="utf-8") as fh:
+                return fh.read()
+        except Exception:
+            return FALLBACK_HELP
+
+    def show(self):
+        if self.win is not None and self.win.winfo_exists():
+            self.win.deiconify()
+            self.win.lift()
+            self.win.focus_force()
+            return
+
+        self._imgs = []
+        self.win = tk.Toplevel(self.root)
+        self.win.title("Prompt Manager for Translators – Help")
+        self.win.configure(bg=COL_BG)
+        self.win.geometry("660x620")
+        self.win.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Header
+        header = tk.Frame(self.win, bg=COL_WHITE)
+        header.pack(fill="x")
+        head_inner = tk.Frame(header, bg=COL_WHITE)
+        head_inner.pack(anchor="w", padx=20, pady=15)
+        try:
+            tk.Label(head_inner, image=self._logo(22), bg=COL_WHITE).pack(
+                side="left", padx=(0, 8))
+        except Exception:
+            pass
+        tk.Label(head_inner, text="Help", bg=COL_WHITE, fg=COL_FG,
+                 font=(UI_FONT, 13, "bold")).pack(side="left")
+        tk.Frame(self.win, height=1, bg=COL_SEP).pack(fill="x")
+
+        # Scrollable text area
+        body = tk.Frame(self.win, bg=COL_WHITE)
+        body.pack(fill="both", expand=True, padx=0, pady=0)
+        scroll = ttk.Scrollbar(body, orient="vertical")
+        scroll.pack(side="right", fill="y")
+        text = tk.Text(body, wrap="word", bg=COL_WHITE, fg=COL_FG,
+                       relief="flat", bd=0, padx=24, pady=18,
+                       font=(UI_FONT, 10), yscrollcommand=scroll.set,
+                       cursor="arrow")
+        text.pack(side="left", fill="both", expand=True)
+        scroll.config(command=text.yview)
+
+        # Text tags for lightweight markdown formatting
+        text.tag_configure("h1", font=(UI_FONT, 16, "bold"), foreground=COL_FG,
+                           spacing1=10, spacing3=8)
+        text.tag_configure("h2", font=(UI_FONT, 13, "bold"), foreground=COL_FG,
+                           spacing1=14, spacing3=6)
+        text.tag_configure("h3", font=(UI_FONT, 11, "bold"), foreground=COL_FG,
+                           spacing1=10, spacing3=4)
+        text.tag_configure("normal", font=(UI_FONT, 10), foreground=COL_FG,
+                           spacing3=3)
+        text.tag_configure("b", font=(UI_FONT, 10, "bold"), foreground=COL_FG)
+        text.tag_configure("code", font=("Courier New", 10),
+                           background="#e9ecef", foreground="#333333")
+        text.tag_configure("note", font=(UI_FONT, 9, "italic"),
+                           foreground="#8a6d00", lmargin1=12, lmargin2=12,
+                           spacing3=3)
+        text.tag_configure("bullet", font=(UI_FONT, 10), foreground=COL_FG,
+                           lmargin1=12, lmargin2=26, spacing3=3)
+
+        self._render_markdown(text, self._load_help_text())
+
+        # Close button
+        footer = tk.Frame(self.win, bg=COL_BG)
+        footer.pack(fill="x")
+        close = tk.Button(footer, text="Close", command=self._on_close,
+                          bg=COL_YELLOW, fg=COL_FG, font=(UI_FONT, 10, "bold"),
+                          relief="flat", bd=0, padx=22, pady=8, cursor="hand2",
+                          activebackground=COL_WHITE, activeforeground=COL_YELLOW)
+        close.pack(anchor="e", padx=20, pady=12)
+
+        self.win.lift()
+        self.win.focus_force()
+
+    def _render_markdown(self, tw, md: str):
+        tw.configure(state="normal")
+        tw.delete("1.0", "end")
+        in_code = False
+        for raw in md.splitlines():
+            if raw.strip().startswith("```"):
+                in_code = not in_code
+                continue
+            if in_code:
+                tw.insert("end", raw + "\n", ("code",))
+                continue
+            if raw.startswith("# "):
+                tw.insert("end", raw[2:] + "\n", ("h1",))
+            elif raw.startswith("## "):
+                tw.insert("end", raw[3:] + "\n", ("h2",))
+            elif raw.startswith("### "):
+                tw.insert("end", raw[4:] + "\n", ("h3",))
+            elif raw.startswith("> "):
+                self._insert_inline(tw, raw[2:] + "\n", base="note")
+            elif raw.strip() == "":
+                tw.insert("end", "\n")
+            else:
+                m = re.match(r"^(\s*[-*]\s+)(.*)", raw)
+                if m:
+                    tw.insert("end", "•  ", ("bullet",))
+                    self._insert_inline(tw, m.group(2) + "\n", base="bullet")
+                else:
+                    self._insert_inline(tw, raw + "\n", base="normal")
+        tw.configure(state="disabled")
+
+    @staticmethod
+    def _insert_inline(tw, s: str, base="normal"):
+        """Insert a line, rendering **bold** and `code` spans."""
+        pos = 0
+        for m in re.finditer(r"\*\*(.+?)\*\*|`([^`]+?)`", s):
+            if m.start() > pos:
+                tw.insert("end", s[pos:m.start()], (base,))
+            if m.group(1) is not None:
+                tw.insert("end", m.group(1), ("b",))
+            else:
+                tw.insert("end", m.group(2), ("code",))
+            pos = m.end()
+        if pos < len(s):
+            tw.insert("end", s[pos:], (base,))
+
+    def _on_close(self):
+        if self.win is not None:
+            self.win.destroy()
+            self.win = None
+
+
+# --------------------------------------------------------------------------- #
+# About window (+ update check)
+# --------------------------------------------------------------------------- #
+
+def _version_tuple(s: str, length: int):
+    parts = [int(x) for x in re.findall(r"\d+", s)]
+    parts += [0] * (length - len(parts))
+    return tuple(parts)
+
+
+def remote_is_newer(remote: str, local: str) -> bool:
+    """True if `remote` version string is strictly newer than `local`."""
+    n = max(len(re.findall(r"\d+", remote)), len(re.findall(r"\d+", local)), 1)
+    return _version_tuple(remote, n) > _version_tuple(local, n)
+
+
+def fetch_remote_version(url: str, timeout: int = 8) -> str:
+    """Fetch the plain-text version file; return the first non-empty line."""
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8", "replace")
+    for line in raw.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+class AboutWindow:
+    def __init__(self, root: tk.Tk):
+        self.root = root
+        self.win = None
+        self._imgs = []
+
+    def _logo(self, height: int):
+        img = Image.open(resource_path("logo.png"))
+        w, h = img.size
+        new_w = max(1, int(round(w * height / h)))
+        photo = ImageTk.PhotoImage(img.resize((new_w, height), Image.LANCZOS))
+        self._imgs.append(photo)
+        return photo
+
+    def show(self):
+        if self.win is not None and self.win.winfo_exists():
+            self.win.deiconify()
+            self.win.lift()
+            self.win.focus_force()
+            return
+
+        self._imgs = []
+        self.win = tk.Toplevel(self.root)
+        self.win.title(f"About {APP_TITLE}")
+        self.win.configure(bg=COL_WHITE)
+        self.win.resizable(False, False)
+        self.win.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # White content card
+        card = tk.Frame(self.win, bg=COL_WHITE)
+        card.pack(fill="both", expand=True, padx=28, pady=(24, 12))
+
+        try:
+            tk.Label(card, image=self._logo(48), bg=COL_WHITE).pack(anchor="w",
+                                                                    pady=(0, 10))
+        except Exception:
+            pass
+
+        # Bold app name + version
+        tk.Label(card, text=f"{APP_TITLE}  v{APP_VERSION}", bg=COL_WHITE, fg=COL_FG,
+                 font=(UI_FONT, 14, "bold")).pack(anchor="w")
+
+        # Short description
+        tk.Label(card, text=APP_DESCRIPTION, bg=COL_WHITE, fg=COL_FG,
+                 font=(UI_FONT, 9), justify="left", wraplength=420).pack(
+                     anchor="w", pady=(8, 14))
+
+        # Author / License
+        tk.Label(card, text=f"Author: {APP_AUTHOR}", bg=COL_WHITE, fg=COL_FG,
+                 font=(UI_FONT, 9)).pack(anchor="w")
+        tk.Label(card, text=f"License: {APP_LICENSE}", bg=COL_WHITE, fg=COL_FG,
+                 font=(UI_FONT, 9)).pack(anchor="w", pady=(2, 0))
+
+        # Footer with Check for updates + Close, both right-aligned
+        tk.Frame(self.win, height=1, bg=COL_SEP).pack(fill="x")
+        footer = tk.Frame(self.win, bg=COL_BG)
+        footer.pack(fill="x")
+
+        close = tk.Button(footer, text="Close", command=self._on_close,
+                          bg=COL_YELLOW, fg=COL_FG, font=(UI_FONT, 10, "bold"),
+                          relief="flat", bd=0, padx=18, pady=8, cursor="hand2",
+                          activebackground=COL_WHITE, activeforeground=COL_YELLOW)
+        close.pack(side="right", padx=(0, 20), pady=12)
+        SettingsWindow._add_hover(close, COL_YELLOW, COL_FG, COL_WHITE, COL_YELLOW)
+
+        self.update_btn = tk.Button(
+            footer, text="Check for updates", command=self._check_updates,
+            bg=COL_WHITE, fg=COL_FG, font=(UI_FONT, 10, "bold"),
+            relief="solid", bd=1, padx=18, pady=8, cursor="hand2",
+            activebackground=COL_YELLOW, activeforeground=COL_WHITE)
+        self.update_btn.pack(side="right", padx=(0, 10), pady=12)
+        SettingsWindow._add_hover(self.update_btn, COL_WHITE, COL_FG,
+                                  COL_YELLOW, COL_WHITE)
+
+        self.win.lift()
+        self.win.focus_force()
+
+    # ---- Update check ----------------------------------------------------- #
+    def _check_updates(self):
+        self.update_btn.configure(text="Checking…", state="disabled")
+        threading.Thread(target=self._do_check, daemon=True).start()
+
+    def _do_check(self):
+        try:
+            remote = fetch_remote_version(VERSION_CHECK_URL)
+        except Exception as exc:
+            self._finish(lambda: messagebox.showwarning(
+                "Prompt Manager",
+                "Could not check for updates.\n\n"
+                f"{exc}", parent=self.win))
+            return
+
+        if not remote or not re.search(r"\d", remote):
+            self._finish(lambda: messagebox.showwarning(
+                "Prompt Manager",
+                "Could not read a version number from the update source.",
+                parent=self.win))
+            return
+
+        if remote_is_newer(remote, APP_VERSION):
+            def prompt():
+                if messagebox.askyesno(
+                    "Prompt Manager",
+                    f"A new version ({remote}) is available — you have "
+                    f"{APP_VERSION}.\n\nOpen the download page?",
+                    parent=self.win,
+                ):
+                    webbrowser.open(GITHUB_URL)
+            self._finish(prompt)
+        else:
+            self._finish(lambda: messagebox.showinfo(
+                "Prompt Manager",
+                f"You have the latest version ({APP_VERSION}).",
+                parent=self.win))
+
+    def _finish(self, dialog):
+        """Restore the button and show a result dialog on the Tk thread."""
+        def run():
+            if self.win is not None and self.win.winfo_exists():
+                self.update_btn.configure(text="Check for updates", state="normal")
+            dialog()
+        self.root.after(0, run)
+
+    def _on_close(self):
+        if self.win is not None:
+            self.win.destroy()
+            self.win = None
+
+
+# --------------------------------------------------------------------------- #
+# Tray icon
+# --------------------------------------------------------------------------- #
+
+def resource_path(name: str) -> str:
+    """Resolve a bundled resource, both from source and from a PyInstaller build."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, name)
+
+
+def make_icon_image() -> Image.Image:
+    """Use the original app logo; fall back to a drawn icon if it's missing."""
+    try:
+        return Image.open(resource_path("logo.png"))
+    except Exception:
+        img = Image.new("RGB", (64, 64), "#2d6cdf")
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([12, 12, 52, 52], outline="white", width=3)
+        draw.line([20, 24, 44, 24], fill="white", width=3)
+        draw.line([20, 32, 44, 32], fill="white", width=3)
+        draw.line([20, 40, 36, 40], fill="white", width=3)
+        return img
+
+
+class App:
+    def __init__(self):
+        # Hidden Tk root that owns the settings window and runs the main loop.
+        self.root = tk.Tk()
+        self.root.withdraw()
+
+        # Use the app logo as the window/title-bar icon (replaces the default
+        # Tk feather). Applied to the root as default, so every Toplevel — the
+        # settings window included — inherits it. Keep a reference alive.
+        try:
+            self._icon_photo = ImageTk.PhotoImage(Image.open(resource_path("logo.png")))
+            self.root.iconphoto(True, self._icon_photo)
+        except Exception:
+            pass
+
+        self.help = HelpWindow(self.root)
+        self.about = AboutWindow(self.root)
+        self.settings = SettingsWindow(self.root,
+                                       on_shortcuts_changed=self.reload_hotkeys,
+                                       on_help=self._open_help)
+
+        # Let a background paste ask for confirmation on the Tk thread.
+        set_confirm_hook(self._confirm_paste)
+
+        self.hotkeys = build_hotkeys()
+        self.icon = pystray.Icon(
+            APP_NAME,
+            make_icon_image(),
+            "Prompt Manager",
+            menu=pystray.Menu(
+                pystray.MenuItem("Settings", self._open_settings, default=True),
+                pystray.MenuItem("Help", self._open_help),
+                pystray.MenuItem("About", self._open_about),
+                pystray.MenuItem("Quit", self._quit),
+            ),
+        )
+
+    # Tray callbacks run on the pystray thread, so marshal UI work onto Tk.
+    def _open_settings(self, icon=None, item=None):
+        self.root.after(0, self.settings.show)
+
+    def _open_help(self, icon=None, item=None):
+        self.root.after(0, self.help.show)
+
+    def _open_about(self, icon=None, item=None):
+        self.root.after(0, self.about.show)
+
+    def reload_hotkeys(self):
+        """Rebuild the global hotkey listener after the user changes shortcuts."""
+        try:
+            self.hotkeys.stop()
+        except Exception:
+            pass
+        self.hotkeys = build_hotkeys()
+        self.hotkeys.start()
+
+    def _confirm_paste(self, masked_preview: str) -> bool:
+        """Ask (on the Tk thread) whether to paste secret-looking text.
+
+        Called from a background paste thread; blocks it until the user answers.
+        """
+        result = {"ok": False}
+        done = threading.Event()
+
+        def ask():
+            try:
+                result["ok"] = messagebox.askyesno(
+                    "Prompt Manager – possible password",
+                    "The text you're about to paste looks like it could be a "
+                    "password or secret:\n\n"
+                    f"    {masked_preview}\n\n"
+                    "Paste it anyway?",
+                    icon="warning", parent=self.root,
+                )
+            finally:
+                done.set()
+
+        self.root.after(0, ask)
+        done.wait()
+        return result["ok"]
+
+    def _quit(self, icon=None, item=None):
+        self.root.after(0, self._shutdown)
+
+    def _shutdown(self):
+        try:
+            self.hotkeys.stop()
+        except Exception:
+            pass
+        try:
+            self.icon.stop()
+        except Exception:
+            pass
+        self.root.quit()
+
+    def run(self):
+        self.hotkeys.start()
+        # pystray runs in its own thread; Tk owns the main thread.
+        threading.Thread(target=self.icon.run, daemon=True).start()
+        self.root.mainloop()
+
+
+if __name__ == "__main__":
+    App().run()

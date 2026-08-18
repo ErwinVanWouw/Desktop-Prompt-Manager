@@ -1,0 +1,4 @@
+pynput
+pyperclip
+pystray
+pillow

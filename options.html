@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Prompt Manager for Translators Options</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+<div class="header">
+  <img src="images/logo.png" alt="Prompt Manager for Translators logo" class="logo" />
+  <h1>Prompt Manager for Translators</h1>
+  <p>– &nbsp;Easily save, manage, and insert up to 9 custom AI prompts</p>
+</div>
+
+<div class="container">
+  <div class="content">
+    <h1>Settings</h1><br/>
+    <div class="intro-text">
+      <h2>Manage your Prompts</h2>
+      <p>The first 4 prompts come pre-configured for translators and text editors, but can be fully customized. Prompts 5 to 9 are empty by default with no shortcuts assigned, but you can customize them as needed. Enter your prompt in the fields below and assign a shortcut following the instructions at the bottom of this page.</p><br/>
+	  <p>You can trigger each prompt using the shortcut <i>Ctrl+Shift+#</i> (e.g. Ctrl+Shift+1 for Prompt 1). On a Mac use shortcut <i>Command+Shift+#</i>. Alternatively, customize the keyboard shortcuts according to the instructions below.</p>
+	  <br/>
+    </div>
+
+    <div class="formcontent">
+      <div class="prompt-columns">
+        <div class="prompt-column">
+          <label for="prompt1">Prompt 1:</label>
+          <input type="text" id="prompt1" />
+
+          <label for="prompt2">Prompt 2:</label>
+          <input type="text" id="prompt2" />
+		  
+		  <label for="prompt3">Prompt 3:</label>
+		  <input type="text" id="prompt3" />
+
+		  <label for="prompt4">Prompt 4:</label>
+		  <input type="text" id="prompt4" />
+        </div>
+
+        <div class="prompt-column">
+		  <label for="prompt5">Prompt 5:</label>
+		  <input type="text" id="prompt5" />
+		  
+		  <label for="prompt6">Prompt 6:</label>
+		  <input type="text" id="prompt6" />
+
+		  <label for="prompt7">Prompt 7:</label>
+		  <input type="text" id="prompt7" />
+
+		  <label for="prompt8">Prompt 8:</label>
+		  <input type="text" id="prompt8" />
+
+		  <label for="prompt9">Prompt 9:</label>
+		  <input type="text" id="prompt9" />
+        </div>
+      </div>
+
+      <div id="button-row">
+        <button id="save">Save Prompts</button>
+        <button id="reset">Reset to Defaults</button>
+      </div>
+    </div>
+
+    <div id="shortcut-instructions">
+      <p><img src="images/logo.png" alt="Prompt Manager for Translators logo" class="logo" />
+      To set up keyboard shortcuts for this extension or adjust the existing ones, go to:<br/><br/>
+      <code>chrome://extensions/shortcuts</code>
+      </p>
+    </div>
+  </div>
+</div><br/>
+<script src="options.js"></script>
+</body>
+</html>
