@@ -1,6 +1,6 @@
 """
-Prompt Manager (desktop edition)
---------------------------------
+Desktop Prompt Manager
+----------------------
 A local, cross-platform tray app that inserts up to 10 custom prompts into any
 focused application (Claude Desktop, ChatGPT Desktop, or anything else) using
 global keyboard shortcuts.
@@ -45,8 +45,8 @@ from PIL import Image, ImageDraw, ImageTk
 # Configuration / storage
 # --------------------------------------------------------------------------- #
 
-APP_NAME = "PromptManager"
-APP_TITLE = "Prompt Manager for Translators"
+APP_NAME = "DesktopPromptManager"
+APP_TITLE = "Desktop Prompt Manager for Translators"
 APP_VERSION = "1.0.0"
 APP_AUTHOR = "Black Kite"
 APP_LICENSE = "GNU General Public License v3"
@@ -456,10 +456,9 @@ SHORTCUT_INSTRUCTIONS = (
 
 
 class SettingsWindow:
-    def __init__(self, root: tk.Tk, on_shortcuts_changed=None, on_help=None):
+    def __init__(self, root: tk.Tk, on_shortcuts_changed=None):
         self.root = root
         self.on_shortcuts_changed = on_shortcuts_changed
-        self.on_help = on_help
         self.win = None
         self.entries = {}
         self.mod_vars = {}   # prompt_key -> StringVar (modifier preset label)
@@ -489,7 +488,7 @@ class SettingsWindow:
         self.key_vars = {}
 
         self.win = tk.Toplevel(self.root)
-        self.win.title("Prompt Manager for Translators")
+        self.win.title(APP_TITLE)
         self.win.configure(bg=COL_BG)
         self.win.resizable(False, False)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -505,7 +504,7 @@ class SettingsWindow:
                                                                           padx=(0, 8))
         except Exception:
             pass
-        tk.Label(head_inner, text="Prompt Manager for Translators", bg=COL_WHITE,
+        tk.Label(head_inner, text=APP_TITLE, bg=COL_WHITE,
                  fg=COL_FG, font=(UI_FONT, 13, "bold")).pack(side="left")
         tk.Label(head_inner, text="–  Easily save, manage, and insert up to 10 "
                  "custom AI prompts", bg=COL_WHITE, fg=COL_FG,
@@ -513,9 +512,15 @@ class SettingsWindow:
 
         tk.Frame(self.win, height=1, bg=COL_SEP).pack(fill="x")
 
-        # ---- Content ---------------------------------------------------------
-        content = tk.Frame(self.win, bg=COL_BG)
+        # ---- Body holds swappable views: settings and (lazily) help ----------
+        self.body = tk.Frame(self.win, bg=COL_BG)
+        self.body.pack(fill="both", expand=True)
+        self.help_content = None
+
+        # ---- Settings view ---------------------------------------------------
+        content = tk.Frame(self.body, bg=COL_BG)
         content.pack(fill="both", expand=True, padx=30, pady=20)
+        self.settings_content = content
 
         tk.Label(content, text="Settings", bg=COL_BG, fg=COL_FG,
                  font=(UI_FONT, 16, "bold")).pack(anchor="w", pady=(0, 15))
@@ -633,13 +638,12 @@ class SettingsWindow:
         reset.pack(side="left")
         self._add_hover(save, COL_YELLOW, COL_FG, COL_WHITE, COL_YELLOW)
         self._add_hover(reset, COL_WHITE, COL_FG, COL_YELLOW, COL_WHITE)
-        if self.on_help:
-            helpb = tk.Button(btns, text="Help", command=self.on_help,
-                              bg=COL_WHITE, fg=COL_FG, font=(UI_FONT, 10, "bold"),
-                              relief="solid", bd=1, padx=22, pady=9, cursor="hand2",
-                              activebackground=COL_YELLOW, activeforeground=COL_WHITE)
-            helpb.pack(side="left", padx=(15, 0))
-            self._add_hover(helpb, COL_WHITE, COL_FG, COL_YELLOW, COL_WHITE)
+        helpb = tk.Button(btns, text="Help", command=self._enter_help,
+                          bg=COL_WHITE, fg=COL_FG, font=(UI_FONT, 10, "bold"),
+                          relief="solid", bd=1, padx=22, pady=9, cursor="hand2",
+                          activebackground=COL_YELLOW, activeforeground=COL_WHITE)
+        helpb.pack(side="left", padx=(15, 0))
+        self._add_hover(helpb, COL_WHITE, COL_FG, COL_YELLOW, COL_WHITE)
 
         # Bottom white instructions box
         instr = tk.Frame(content, bg=COL_WHITE)
@@ -656,9 +660,55 @@ class SettingsWindow:
         tk.Label(row, text=SHORTCUT_INSTRUCTIONS, bg=COL_WHITE, fg=COL_FG,
                  font=(UI_FONT, 9), justify="left", wraplength=520).pack(side="left")
 
+        # Pin the window to the settings size so swapping to the help view
+        # (and back) doesn't make the window jump around.
         self.win.update_idletasks()
+        self.win.geometry(f"{self.win.winfo_reqwidth()}x{self.win.winfo_reqheight()}")
         self.win.lift()
         self.win.focus_force()
+
+    # ---- Inline help view (takes over the settings window) --------------- #
+    def _enter_help(self):
+        if self.help_content is None:
+            self.help_content = self._build_help_view(self.body)
+        self.settings_content.pack_forget()
+        self.help_content.pack(fill="both", expand=True)
+
+    def _exit_help(self):
+        if self.help_content is not None:
+            self.help_content.pack_forget()
+        self.settings_content.pack(fill="both", expand=True, padx=30, pady=20)
+
+    def _build_help_view(self, parent):
+        frame = tk.Frame(parent, bg=COL_BG)
+
+        title = tk.Frame(frame, bg=COL_BG)
+        title.pack(fill="x", padx=30, pady=(16, 8))
+        tk.Label(title, text="Help", bg=COL_BG, fg=COL_FG,
+                 font=(UI_FONT, 16, "bold")).pack(side="left")
+
+        area = tk.Frame(frame, bg=COL_WHITE)
+        area.pack(fill="both", expand=True, padx=30)
+        scroll = ttk.Scrollbar(area, orient="vertical")
+        scroll.pack(side="right", fill="y")
+        text = tk.Text(area, wrap="word", bg=COL_WHITE, fg=COL_FG, relief="flat",
+                       bd=0, padx=20, pady=16, font=(UI_FONT, 10),
+                       yscrollcommand=scroll.set, cursor="arrow", width=1, height=1)
+        text.pack(side="left", fill="both", expand=True)
+        scroll.config(command=text.yview)
+        configure_help_tags(text)
+        render_help_markdown(text, load_help_text())
+
+        footer = tk.Frame(frame, bg=COL_BG)
+        footer.pack(fill="x", padx=30, pady=12)
+        back = tk.Button(footer, text="←  Back to settings",
+                         command=self._exit_help, bg=COL_YELLOW, fg=COL_FG,
+                         font=(UI_FONT, 10, "bold"), relief="flat", bd=0, padx=20,
+                         pady=8, cursor="hand2", activebackground=COL_WHITE,
+                         activeforeground=COL_YELLOW)
+        back.pack(side="left")
+        self._add_hover(back, COL_YELLOW, COL_FG, COL_WHITE, COL_YELLOW)
+        return frame
 
     @staticmethod
     def _add_hover(widget, bg, fg, hover_bg, hover_fg):
@@ -690,7 +740,7 @@ class SettingsWindow:
         if dupes:
             unique = ", ".join(sorted(set(dupes)))
             if not messagebox.askyesno(
-                "Prompt Manager – duplicate shortcuts",
+                "Desktop Prompt Manager – duplicate shortcuts",
                 f"These shortcuts are assigned to more than one prompt: {unique}.\n\n"
                 "Only one prompt per combination will respond. Save anyway?",
                 parent=self.win,
@@ -701,7 +751,7 @@ class SettingsWindow:
                     shortcuts=shortcuts, password_warning=self.pw_warn_var.get())
         if self.on_shortcuts_changed:
             self.on_shortcuts_changed()
-        messagebox.showinfo("Prompt Manager", "✅ Prompts saved.", parent=self.win)
+        messagebox.showinfo("Desktop Prompt Manager", "✅ Prompts saved.", parent=self.win)
 
     def _reset(self):
         for key, entry in self.entries.items():
@@ -718,7 +768,7 @@ class SettingsWindow:
         if self.on_shortcuts_changed:
             self.on_shortcuts_changed()
         messagebox.showinfo(
-            "Prompt Manager", "\U0001F504 Prompts reset to defaults.", parent=self.win
+            "Desktop Prompt Manager", "\U0001F504 Prompts reset to defaults.", parent=self.win
         )
 
     def _on_close(self):
@@ -732,7 +782,7 @@ class SettingsWindow:
 # --------------------------------------------------------------------------- #
 
 FALLBACK_HELP = (
-    "# Prompt Manager\n\n"
+    "# Desktop Prompt Manager\n\n"
     "Insert up to 10 custom prompts into any focused app with global shortcuts.\n\n"
     "## Shortcuts\n"
     "Default: Ctrl+Shift+1..9 for prompts 1-9, Ctrl+Shift+0 for prompt 10. "
@@ -743,6 +793,80 @@ FALLBACK_HELP = (
     "## Password safety net\n"
     "Warns before pasting copied text that looks like a password or secret.\n"
 )
+
+
+def load_help_text() -> str:
+    """Read the README so the in-app help shows the same guide."""
+    try:
+        with open(resource_path("README.md"), "r", encoding="utf-8") as fh:
+            return fh.read()
+    except Exception:
+        return FALLBACK_HELP
+
+
+def configure_help_tags(tw: "tk.Text") -> None:
+    """Set the text tags used for lightweight markdown rendering."""
+    tw.tag_configure("h1", font=(UI_FONT, 16, "bold"), foreground=COL_FG,
+                     spacing1=10, spacing3=8)
+    tw.tag_configure("h2", font=(UI_FONT, 13, "bold"), foreground=COL_FG,
+                     spacing1=14, spacing3=6)
+    tw.tag_configure("h3", font=(UI_FONT, 11, "bold"), foreground=COL_FG,
+                     spacing1=10, spacing3=4)
+    tw.tag_configure("normal", font=(UI_FONT, 10), foreground=COL_FG, spacing3=3)
+    tw.tag_configure("b", font=(UI_FONT, 10, "bold"), foreground=COL_FG)
+    tw.tag_configure("code", font=("Courier New", 10),
+                     background="#e9ecef", foreground="#333333")
+    tw.tag_configure("note", font=(UI_FONT, 9, "italic"), foreground="#8a6d00",
+                     lmargin1=12, lmargin2=12, spacing3=3)
+    tw.tag_configure("bullet", font=(UI_FONT, 10), foreground=COL_FG,
+                     lmargin1=12, lmargin2=26, spacing3=3)
+
+
+def _insert_help_inline(tw, s: str, base="normal"):
+    """Insert a line, rendering **bold** and `code` spans."""
+    pos = 0
+    for m in re.finditer(r"\*\*(.+?)\*\*|`([^`]+?)`", s):
+        if m.start() > pos:
+            tw.insert("end", s[pos:m.start()], (base,))
+        if m.group(1) is not None:
+            tw.insert("end", m.group(1), ("b",))
+        else:
+            tw.insert("end", m.group(2), ("code",))
+        pos = m.end()
+    if pos < len(s):
+        tw.insert("end", s[pos:], (base,))
+
+
+def render_help_markdown(tw: "tk.Text", md: str) -> None:
+    """Render a subset of markdown into a Text widget, then lock it read-only."""
+    tw.configure(state="normal")
+    tw.delete("1.0", "end")
+    in_code = False
+    for raw in md.splitlines():
+        if raw.strip().startswith("```"):
+            in_code = not in_code
+            continue
+        if in_code:
+            tw.insert("end", raw + "\n", ("code",))
+            continue
+        if raw.startswith("# "):
+            tw.insert("end", raw[2:] + "\n", ("h1",))
+        elif raw.startswith("## "):
+            tw.insert("end", raw[3:] + "\n", ("h2",))
+        elif raw.startswith("### "):
+            tw.insert("end", raw[4:] + "\n", ("h3",))
+        elif raw.startswith("> "):
+            _insert_help_inline(tw, raw[2:] + "\n", base="note")
+        elif raw.strip() == "":
+            tw.insert("end", "\n")
+        else:
+            m = re.match(r"^(\s*[-*]\s+)(.*)", raw)
+            if m:
+                tw.insert("end", "•  ", ("bullet",))
+                _insert_help_inline(tw, m.group(2) + "\n", base="bullet")
+            else:
+                _insert_help_inline(tw, raw + "\n", base="normal")
+    tw.configure(state="disabled")
 
 
 class HelpWindow:
@@ -759,14 +883,6 @@ class HelpWindow:
         self._imgs.append(photo)
         return photo
 
-    @staticmethod
-    def _load_help_text() -> str:
-        try:
-            with open(resource_path("README.md"), "r", encoding="utf-8") as fh:
-                return fh.read()
-        except Exception:
-            return FALLBACK_HELP
-
     def show(self):
         if self.win is not None and self.win.winfo_exists():
             self.win.deiconify()
@@ -776,7 +892,7 @@ class HelpWindow:
 
         self._imgs = []
         self.win = tk.Toplevel(self.root)
-        self.win.title("Prompt Manager for Translators – Help")
+        self.win.title(f"{APP_TITLE} – Help")
         self.win.configure(bg=COL_BG)
         self.win.geometry("660x620")
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -807,25 +923,8 @@ class HelpWindow:
         text.pack(side="left", fill="both", expand=True)
         scroll.config(command=text.yview)
 
-        # Text tags for lightweight markdown formatting
-        text.tag_configure("h1", font=(UI_FONT, 16, "bold"), foreground=COL_FG,
-                           spacing1=10, spacing3=8)
-        text.tag_configure("h2", font=(UI_FONT, 13, "bold"), foreground=COL_FG,
-                           spacing1=14, spacing3=6)
-        text.tag_configure("h3", font=(UI_FONT, 11, "bold"), foreground=COL_FG,
-                           spacing1=10, spacing3=4)
-        text.tag_configure("normal", font=(UI_FONT, 10), foreground=COL_FG,
-                           spacing3=3)
-        text.tag_configure("b", font=(UI_FONT, 10, "bold"), foreground=COL_FG)
-        text.tag_configure("code", font=("Courier New", 10),
-                           background="#e9ecef", foreground="#333333")
-        text.tag_configure("note", font=(UI_FONT, 9, "italic"),
-                           foreground="#8a6d00", lmargin1=12, lmargin2=12,
-                           spacing3=3)
-        text.tag_configure("bullet", font=(UI_FONT, 10), foreground=COL_FG,
-                           lmargin1=12, lmargin2=26, spacing3=3)
-
-        self._render_markdown(text, self._load_help_text())
+        configure_help_tags(text)
+        render_help_markdown(text, load_help_text())
 
         # Close button
         footer = tk.Frame(self.win, bg=COL_BG)
@@ -838,51 +937,6 @@ class HelpWindow:
 
         self.win.lift()
         self.win.focus_force()
-
-    def _render_markdown(self, tw, md: str):
-        tw.configure(state="normal")
-        tw.delete("1.0", "end")
-        in_code = False
-        for raw in md.splitlines():
-            if raw.strip().startswith("```"):
-                in_code = not in_code
-                continue
-            if in_code:
-                tw.insert("end", raw + "\n", ("code",))
-                continue
-            if raw.startswith("# "):
-                tw.insert("end", raw[2:] + "\n", ("h1",))
-            elif raw.startswith("## "):
-                tw.insert("end", raw[3:] + "\n", ("h2",))
-            elif raw.startswith("### "):
-                tw.insert("end", raw[4:] + "\n", ("h3",))
-            elif raw.startswith("> "):
-                self._insert_inline(tw, raw[2:] + "\n", base="note")
-            elif raw.strip() == "":
-                tw.insert("end", "\n")
-            else:
-                m = re.match(r"^(\s*[-*]\s+)(.*)", raw)
-                if m:
-                    tw.insert("end", "•  ", ("bullet",))
-                    self._insert_inline(tw, m.group(2) + "\n", base="bullet")
-                else:
-                    self._insert_inline(tw, raw + "\n", base="normal")
-        tw.configure(state="disabled")
-
-    @staticmethod
-    def _insert_inline(tw, s: str, base="normal"):
-        """Insert a line, rendering **bold** and `code` spans."""
-        pos = 0
-        for m in re.finditer(r"\*\*(.+?)\*\*|`([^`]+?)`", s):
-            if m.start() > pos:
-                tw.insert("end", s[pos:m.start()], (base,))
-            if m.group(1) is not None:
-                tw.insert("end", m.group(1), ("b",))
-            else:
-                tw.insert("end", m.group(2), ("code",))
-            pos = m.end()
-        if pos < len(s):
-            tw.insert("end", s[pos:], (base,))
 
     def _on_close(self):
         if self.win is not None:
@@ -920,15 +974,6 @@ class AboutWindow:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.win = None
-        self._imgs = []
-
-    def _logo(self, height: int):
-        img = Image.open(resource_path("logo.png"))
-        w, h = img.size
-        new_w = max(1, int(round(w * height / h)))
-        photo = ImageTk.PhotoImage(img.resize((new_w, height), Image.LANCZOS))
-        self._imgs.append(photo)
-        return photo
 
     def show(self):
         if self.win is not None and self.win.winfo_exists():
@@ -937,7 +982,6 @@ class AboutWindow:
             self.win.focus_force()
             return
 
-        self._imgs = []
         self.win = tk.Toplevel(self.root)
         self.win.title(f"About {APP_TITLE}")
         self.win.configure(bg=COL_WHITE)
@@ -947,12 +991,6 @@ class AboutWindow:
         # White content card
         card = tk.Frame(self.win, bg=COL_WHITE)
         card.pack(fill="both", expand=True, padx=28, pady=(24, 12))
-
-        try:
-            tk.Label(card, image=self._logo(48), bg=COL_WHITE).pack(anchor="w",
-                                                                    pady=(0, 10))
-        except Exception:
-            pass
 
         # Bold app name + version
         tk.Label(card, text=f"{APP_TITLE}  v{APP_VERSION}", bg=COL_WHITE, fg=COL_FG,
@@ -1039,16 +1077,16 @@ class AboutWindow:
                 self.update_btn.configure(text="Check for updates", state="normal")
             if kind == "update":
                 if messagebox.askyesno(
-                    "Prompt Manager",
+                    "Desktop Prompt Manager",
                     f"A new version ({payload}) is available — you have "
                     f"{APP_VERSION}.\n\nOpen the download page?",
                     parent=self.win,
                 ):
                     webbrowser.open(GITHUB_URL)
             elif kind == "info":
-                messagebox.showinfo("Prompt Manager", payload, parent=self.win)
+                messagebox.showinfo("Desktop Prompt Manager", payload, parent=self.win)
             else:
-                messagebox.showwarning("Prompt Manager", payload, parent=self.win)
+                messagebox.showwarning("Desktop Prompt Manager", payload, parent=self.win)
         self.root.after(0, run)
 
     def _on_close(self):
@@ -1099,8 +1137,7 @@ class App:
         self.help = HelpWindow(self.root)
         self.about = AboutWindow(self.root)
         self.settings = SettingsWindow(self.root,
-                                       on_shortcuts_changed=self.reload_hotkeys,
-                                       on_help=self._open_help)
+                                       on_shortcuts_changed=self.reload_hotkeys)
 
         # Let a background paste ask for confirmation on the Tk thread.
         set_confirm_hook(self._confirm_paste)
@@ -1109,9 +1146,9 @@ class App:
         self.icon = pystray.Icon(
             APP_NAME,
             make_icon_image(),
-            "Prompt Manager",
+            "Desktop Prompt Manager",
             menu=pystray.Menu(
-                pystray.MenuItem("Settings", self._open_settings, default=True),
+                pystray.MenuItem("Settings", self._open_settings),
                 pystray.MenuItem("Help", self._open_help),
                 pystray.MenuItem("About", self._open_about),
                 pystray.MenuItem("Quit", self._quit),
@@ -1148,7 +1185,7 @@ class App:
         def ask():
             try:
                 result["ok"] = messagebox.askyesno(
-                    "Prompt Manager – possible password",
+                    "Desktop Prompt Manager – possible password",
                     "The text you're about to paste looks like it could be a "
                     "password or secret:\n\n"
                     f"    {masked_preview}\n\n"
