@@ -59,8 +59,8 @@ APP_DESCRIPTION = (
 # SET THESE to your own URLs. VERSION_CHECK_URL must point to a plain-text file
 # that contains only the latest version number (e.g. "1.2.0"). GITHUB_URL is
 # where users are sent to download a newer version.
-VERSION_CHECK_URL = "https://raw.githubusercontent.com/black-kite/prompt-manager/main/VERSION"
-GITHUB_URL = "https://github.com/black-kite/prompt-manager"
+VERSION_CHECK_URL = "https://raw.githubusercontent.com/ErwinVanWouw/Desktop-Prompt-Manager/main/version.txt"
+GITHUB_URL = "https://github.com/ErwinVanWouw/Desktop-Prompt-Manager"
 
 NUM_PROMPTS = 10  # prompt1 .. prompt10
 
