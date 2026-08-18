@@ -31,6 +31,7 @@ import threading
 import time
 import webbrowser
 import urllib.request
+import urllib.error
 
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -998,44 +999,56 @@ class AboutWindow:
         threading.Thread(target=self._do_check, daemon=True).start()
 
     def _do_check(self):
+        # Build a plain message synchronously (never reference the exception
+        # object in a deferred callback — Python clears it after the except
+        # block, which would raise inside the Tk thread).
         try:
             remote = fetch_remote_version(VERSION_CHECK_URL)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                msg = ("The version file was not found (HTTP 404).\n\n"
+                       "If your GitHub repository is private, its raw file URLs "
+                       "are not publicly accessible. Make the repository public, "
+                       "or host the version file somewhere public.")
+            else:
+                msg = f"The update server returned HTTP {exc.code}."
+            self._show("warning", msg)
+            return
         except Exception as exc:
-            self._finish(lambda: messagebox.showwarning(
-                "Prompt Manager",
-                "Could not check for updates.\n\n"
-                f"{exc}", parent=self.win))
+            self._show("warning", f"Could not reach the update server.\n\n{exc}")
             return
 
         if not remote or not re.search(r"\d", remote):
-            self._finish(lambda: messagebox.showwarning(
-                "Prompt Manager",
-                "Could not read a version number from the update source.",
-                parent=self.win))
+            self._show("warning",
+                       "Could not read a version number from the update source.")
             return
 
         if remote_is_newer(remote, APP_VERSION):
-            def prompt():
+            self._show("update", remote)
+        else:
+            self._show("info", f"You have the latest version ({APP_VERSION}).")
+
+    def _show(self, kind: str, payload: str):
+        """Restore the button and show a result on the Tk thread.
+
+        Values are bound via default arguments so the scheduled callback is
+        safe regardless of thread or timing.
+        """
+        def run(kind=kind, payload=payload):
+            if self.win is not None and self.win.winfo_exists():
+                self.update_btn.configure(text="Check for updates", state="normal")
+            if kind == "update":
                 if messagebox.askyesno(
                     "Prompt Manager",
-                    f"A new version ({remote}) is available — you have "
+                    f"A new version ({payload}) is available — you have "
                     f"{APP_VERSION}.\n\nOpen the download page?",
                     parent=self.win,
                 ):
                     webbrowser.open(GITHUB_URL)
-            self._finish(prompt)
-        else:
-            self._finish(lambda: messagebox.showinfo(
-                "Prompt Manager",
-                f"You have the latest version ({APP_VERSION}).",
-                parent=self.win))
-
-    def _finish(self, dialog):
-        """Restore the button and show a result dialog on the Tk thread."""
-        def run():
-            if self.win is not None and self.win.winfo_exists():
-                self.update_btn.configure(text="Check for updates", state="normal")
-            dialog()
+            elif kind == "info":
+                messagebox.showinfo("Prompt Manager", payload, parent=self.win)
+            else:
+                messagebox.showwarning("Prompt Manager", payload, parent=self.win)
         self.root.after(0, run)
 
     def _on_close(self):
