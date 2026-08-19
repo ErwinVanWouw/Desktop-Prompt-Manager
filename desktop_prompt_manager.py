@@ -6,8 +6,7 @@ focused application (Claude Desktop, ChatGPT Desktop, or anything else) using
 global keyboard shortcuts.
 
 Default trigger scheme (each shortcut is customizable in Settings):
-    Ctrl+Shift+1 .. Ctrl+Shift+9  -> prompt 1 .. 9
-    Ctrl+Shift+0                  -> prompt 10
+    Ctrl+Shift+F1 .. Ctrl+Shift+F10  -> prompt 1 .. 10
 
 How it works: on a hotkey it copies the stored prompt to the clipboard and
 simulates a paste (Ctrl+V, or Cmd+V on macOS) into whatever window is focused.
@@ -78,9 +77,9 @@ DEFAULT_PROMPTS = {
     "prompt10": "",
 }
 
-# Default hotkeys in pynput format (e.g. "<ctrl>+<shift>+3").
-DEFAULT_SHORTCUTS = {f"prompt{i}": f"<ctrl>+<shift>+{i}" for i in range(1, 10)}
-DEFAULT_SHORTCUTS["prompt10"] = "<ctrl>+<shift>+0"
+# Default hotkeys in pynput format. F-keys are used because they rarely clash
+# with the target app's own shortcuts (e.g. Claude Desktop).
+DEFAULT_SHORTCUTS = {f"prompt{i}": f"<ctrl>+<shift>+<f{i}>" for i in range(1, 11)}
 
 # Modifier presets offered in the Settings dropdown -> pynput tokens.
 MODIFIER_PRESETS = {
@@ -92,11 +91,13 @@ MODIFIER_PRESETS = {
     "Ctrl+Shift+Alt": ["<ctrl>", "<shift>", "<alt>"],
 }
 
-# Keys offered in the Settings dropdown: 0-9, A-Z, F1-F12.
+# Keys offered in the Settings dropdown: 0-9, then F1-F12, then A-Z.
+# F-keys come right after the digits so they're easy to find near the top of
+# the list (they rarely clash with an app's own shortcuts).
 KEY_CHOICES = (
     [str(d) for d in range(10)]
-    + [chr(c) for c in range(ord("A"), ord("Z") + 1)]
     + [f"F{n}" for n in range(1, 13)]
+    + [chr(c) for c in range(ord("A"), ord("Z") + 1)]
 )
 
 
@@ -341,7 +342,7 @@ def _insert_prompt(text: str, append_clipboard: bool = True,
     refocus = False
 
     # Read whatever the user just copied, so we can instruct in one action:
-    # e.g. copy a sentence, press Ctrl+Shift+3, get "Translate: <that sentence>".
+    # e.g. copy a sentence, press Ctrl+Shift+F3, get "Translate: <that sentence>".
     try:
         original = pyperclip.paste()
         if not isinstance(original, str):
@@ -444,10 +445,10 @@ INTRO_PARA_1 = (
     "shortcut for each prompt is shown next to it."
 )
 INTRO_PARA_2 = (
-    "By default you trigger each prompt with Ctrl+Shift+# (e.g. Ctrl+Shift+1 for "
-    "Prompt 1) and Ctrl+Shift+0 for Prompt 10. You can change each shortcut with "
-    "the dropdowns next to it. The shortcuts work in any application, including "
-    "Claude Desktop and ChatGPT Desktop."
+    "By default you trigger each prompt with Ctrl+Shift+F1 to Ctrl+Shift+F10 "
+    "(F-keys rarely clash with the app's own shortcuts). You can change each "
+    "shortcut with the dropdowns next to it. The shortcuts work in any "
+    "application, including Claude Desktop and ChatGPT Desktop."
 )
 SHORTCUT_INSTRUCTIONS = (
     "Set each prompt's shortcut with the modifier and key dropdowns next to it, "
@@ -568,7 +569,7 @@ class SettingsWindow:
             self.key_vars[key] = key_var
 
             key_cb = ttk.Combobox(top, textvariable=key_var, values=KEY_CHOICES,
-                                  width=4, state="readonly")
+                                  width=4, height=22, state="readonly")
             key_cb.pack(side="right")
             mod_cb = ttk.Combobox(top, textvariable=mod_var,
                                   values=list(MODIFIER_PRESETS.keys()), width=13,
@@ -785,7 +786,7 @@ FALLBACK_HELP = (
     "# Desktop Prompt Manager\n\n"
     "Insert up to 10 custom prompts into any focused app with global shortcuts.\n\n"
     "## Shortcuts\n"
-    "Default: Ctrl+Shift+1..9 for prompts 1-9, Ctrl+Shift+0 for prompt 10. "
+    "Default: Ctrl+Shift+F1..F10 for prompts 1-10. "
     "Change them per prompt in Settings.\n\n"
     "## One-action instructing\n"
     "Copy a snippet, press a shortcut, and the prompt is inserted with your "

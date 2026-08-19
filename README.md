@@ -10,16 +10,18 @@ works outside the browser.
 
 Default scheme (each shortcut is **customizable** in Settings):
 
-| Shortcut        | Prompt     |
-| --------------- | ---------- |
-| `Ctrl+Shift+1`  | Prompt 1   |
-| …               | …          |
-| `Ctrl+Shift+9`  | Prompt 9   |
-| `Ctrl+Shift+0`  | Prompt 10  |
+| Shortcut         | Prompt     |
+| ---------------- | ---------- |
+| `Ctrl+Shift+F1`  | Prompt 1   |
+| …                | …          |
+| `Ctrl+Shift+F9`  | Prompt 9   |
+| `Ctrl+Shift+F10` | Prompt 10  |
 
-In Settings each prompt has two dropdowns — a modifier preset (Ctrl+Shift,
-Ctrl+Alt, Alt, …) and a key (0–9, A–Z, F1–F12) — so you can reassign any
-shortcut. Changes take effect immediately on Save; duplicates are flagged.
+Function keys are the default because they rarely clash with the target app's
+own shortcuts (Claude Desktop included). In Settings each prompt has two
+dropdowns — a modifier preset (Ctrl+Shift, Ctrl+Alt, Alt, …) and a key
+(0–9, F1–F12, A–Z) — so you can reassign any shortcut. Changes take effect
+immediately on Save; duplicates are flagged.
 
 On macOS the trigger is still `Ctrl+Shift+…`; the paste is sent as `Cmd+V`.
 
@@ -38,7 +40,7 @@ Because a desktop app has full clipboard access (unlike the browser extension),
 you can instruct in a single keystroke:
 
 1. Copy a snippet of text somewhere (Ctrl+C).
-2. Focus the AI input and press, say, `Ctrl+Shift+3`.
+2. Focus the AI input and press, say, `Ctrl+Shift+F3`.
 3. The app inserts `Translate: <your copied text>` in one go.
 
 It reads your copied text, prepends the prompt, pastes the combination, and then
