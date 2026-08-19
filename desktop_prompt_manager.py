@@ -14,9 +14,9 @@ This mirrors the behaviour of the original browser extension without needing
 any per-site DOM selectors.
 
 Extras beyond the extension:
-  * one-action instructing — optionally append the text you just copied after
+  * one-action instructing – optionally append the text you just copied after
     the prompt, so "copy + shortcut" inserts e.g. "Translate: <copied text>";
-  * a password safety net — warns before pasting copied text that looks like a
+  * a password safety net – warns before pasting copied text that looks like a
     password, API key or token.
 
 Dependencies:  pip install pynput pyperclip pystray pillow
@@ -51,7 +51,7 @@ APP_AUTHOR = "Black Kite"
 APP_LICENSE = "GNU General Public License v3"
 APP_DESCRIPTION = (
     "A local tray app that inserts up to 10 custom prompts into any focused "
-    "application — such as Claude Desktop and ChatGPT Desktop — using global "
+    "application – such as Claude Desktop and ChatGPT Desktop – using global "
     "keyboard shortcuts."
 )
 
@@ -317,7 +317,7 @@ def _focus_window(hwnd) -> None:
 
     Needed because the password-confirmation dialog takes focus away from the
     target app; without this the subsequent paste would go nowhere. Windows
-    only — a no-op on other platforms.
+    only – a no-op on other platforms.
     """
     if sys.platform != "win32" or not hwnd:
         return
@@ -491,7 +491,7 @@ def _grab_selection() -> str:
     """Copy the current selection (Ctrl+C) and return it; '' if nothing selected.
 
     Uses an empty-clipboard sentinel so we only treat text as a selection when
-    Ctrl+C actually produced something — i.e. only when the user had text
+    Ctrl+C actually produced something – i.e. only when the user had text
     selected at the moment the shortcut fired.
     """
     mod = keyboard.Key.cmd if sys.platform == "darwin" else keyboard.Key.ctrl
@@ -734,7 +734,7 @@ INTRO_PARA_2 = (
     "By default you trigger each prompt with Ctrl+Shift+F1 to Ctrl+Shift+F10 "
     "(F-keys rarely clash with the app's own shortcuts). You can change each "
     "shortcut with the dropdowns next to it. The shortcuts work in any "
-    "application, including Claude Desktop and ChatGPT Desktop."
+    "application."
 )
 
 
@@ -885,7 +885,7 @@ class SettingsWindow:
         tk.Label(
             opt,
             text=("When on: copy a snippet, press a shortcut, and e.g. "
-                  "\"Translate: \" is inserted with your copied text right after it."),
+                  "'Rephrase: ' is inserted with your copied text right after it."),
             bg=COL_BG, fg=COL_FG, font=(UI_FONT, 8), justify="left",
             wraplength=560,
         ).pack(anchor="w", padx=(22, 0))
@@ -946,9 +946,13 @@ class SettingsWindow:
                            activebackground=COL_YELLOW, activeforeground=COL_WHITE)
         browse.pack(side="left", padx=(8, 0))
         self._add_hover(browse, COL_WHITE, COL_FG, COL_YELLOW, COL_WHITE)
-        self.target_label = tk.Label(picker, text=self._target_label_text(),
-                                     bg=COL_BG, fg=COL_FG, font=(UI_FONT, 8))
-        self.target_label.pack(side="left", padx=(10, 0))
+        selrow = tk.Frame(tgt, bg=COL_BG)
+        selrow.pack(anchor="w", fill="x", padx=(22, 0), pady=(6, 0))
+        tk.Label(selrow, text="Selected app:", bg=COL_BG, fg=COL_FG,
+                 font=(UI_FONT, 9, "bold")).pack(side="left")
+        self.target_label = tk.Label(selrow, text=self._target_label_text(),
+                                     bg=COL_BG, fg=COL_FG, font=(UI_FONT, 9))
+        self.target_label.pack(side="left", padx=(6, 0))
 
         # Buttons
         btns = tk.Frame(content, bg=COL_BG)
@@ -1225,7 +1229,7 @@ class SettingsWindow:
                 return
 
         # If target mode is on but no app was chosen, it silently falls back to
-        # the focused window — let the user know.
+        # the focused window – let the user know.
         if self.target_var.get() and not self.target:
             messagebox.showwarning(
                 "Desktop Prompt Manager",
@@ -1259,7 +1263,7 @@ class SettingsWindow:
         )
 
     def _on_close(self):
-        # Closing the window keeps your changes — no need to click Save first.
+        # Closing the window keeps your changes – no need to click Save first.
         try:
             self._persist()
         except Exception:
@@ -1538,7 +1542,7 @@ class AboutWindow:
 
     def _do_check(self):
         # Build a plain message synchronously (never reference the exception
-        # object in a deferred callback — Python clears it after the except
+        # object in a deferred callback – Python clears it after the except
         # block, which would raise inside the Tk thread).
         try:
             remote = fetch_remote_version(VERSION_CHECK_URL)
@@ -1578,7 +1582,7 @@ class AboutWindow:
             if kind == "update":
                 if messagebox.askyesno(
                     "Desktop Prompt Manager",
-                    f"A new version ({payload}) is available — you have "
+                    f"A new version ({payload}) is available – you have "
                     f"{APP_VERSION}.\n\nOpen the download page?",
                     parent=self.win,
                 ):
@@ -1626,8 +1630,8 @@ class App:
         self.root.withdraw()
 
         # Use the app logo as the window/title-bar icon (replaces the default
-        # Tk feather). Applied to the root as default, so every Toplevel — the
-        # settings window included — inherits it. Keep a reference alive.
+        # Tk feather). Applied to the root as default, so every Toplevel – the
+        # settings window included – inherits it. Keep a reference alive.
         try:
             self._icon_photo = ImageTk.PhotoImage(Image.open(resource_path("logo.png")))
             self.root.iconphoto(True, self._icon_photo)

@@ -1,7 +1,7 @@
 # Desktop Prompt Manager for Translators
 
 A local, cross-platform tray app that inserts up to **10 custom prompts** into
-any focused application — Claude Desktop, ChatGPT Desktop, or anything else —
+any focused application – Claude Desktop, ChatGPT Desktop, or anything else –
 using global keyboard shortcuts. It is the desktop counterpart of the original
 browser extension: same prompts, same defaults, same shortcut scheme, but it
 works outside the browser.
@@ -19,8 +19,8 @@ Default scheme (each shortcut is **customizable** in Settings):
 
 Function keys are the default because they rarely clash with the target app's
 own shortcuts (Claude Desktop included). In Settings each prompt has two
-dropdowns — a modifier preset (Ctrl+Shift, Ctrl+Alt, Alt, …) and a key
-(0–9, F1–F12, A–Z) — so you can reassign any shortcut. Settings are kept when
+dropdowns – a modifier preset (Ctrl+Shift, Ctrl+Alt, Alt, …) and a key
+(0–9, F1–F12, A–Z) – so you can reassign any shortcut. Settings are kept when
 you click **Save Prompts** or simply close the window, and take effect
 immediately; duplicate shortcuts are flagged on Save.
 
@@ -30,9 +30,9 @@ On macOS the trigger is still `Ctrl+Shift+…`; the paste is sent as `Cmd+V`.
 
 On a hotkey the app builds the text to insert, selects the existing input
 (Ctrl+A / Cmd+A) and simulates a paste into the focused window. Because it
-selects first, a new prompt **replaces** whatever is in the field — so picking
+selects first, a new prompt **replaces** whatever is in the field – so picking
 the wrong shortcut just overwrites it, no manual deleting needed. No per-site
-DOM selectors are needed, so it works in any text field — desktop LLM apps
+DOM selectors are needed, so it works in any text field – desktop LLM apps
 included.
 
 ### Instruct in one action (append copied text)
@@ -60,21 +60,21 @@ Settings.
 
 ## Send to a specific app (target mode)
 
-By default a prompt is pasted into **whatever window is focused** — the app
+By default a prompt is pasted into **whatever window is focused** – the app
 works OS-wide. Optionally you can route prompts to **one fixed app** instead:
 
 1. In Settings, tick **"Send prompts to a specific app instead of the focused
    window"** and choose the app in one of two ways:
-   - **Pick installed app…** — a searchable list of installed apps, including
+   - **Pick installed app…** – a searchable list of installed apps, including
      **Microsoft Store apps** such as Claude Desktop (matched and launched by
      its app id, so store-app updates don't break it).
-   - **Browse .exe…** — point directly at a program's `.exe` (for standalone,
+   - **Browse .exe…** – point directly at a program's `.exe` (for standalone,
      non-store installs).
 2. Now, while translating: select a snippet in your CAT tool and press a
    shortcut (e.g. `Ctrl+Shift+F3`).
 3. The app copies your selection, brings the target app to the front (launching
    it first if it isn't running), and pastes `Translate: <your selection>` into
-   it — all in one keystroke. Your original clipboard is restored afterwards.
+   it – all in one keystroke. Your original clipboard is restored afterwards.
 
 The selection is only picked up at the moment you press the shortcut, so nothing
 is copied behind your back. This mode is **Windows only**; with it off the app
@@ -87,7 +87,7 @@ behaves OS-wide as before.
 ## Help window
 
 Right-click the tray icon and choose **Help** (or click **Help** in Settings) to
-open a window that shows this guide inside the app — a quick reference without
+open a window that shows this guide inside the app – a quick reference without
 leaving your desktop.
 
 ## About & update check
@@ -101,10 +101,10 @@ only the latest version number and compares it to the running version. If the
 remote version is newer, it offers to open the GitHub download page. Configure
 it near the top of `desktop_prompt_manager.py`:
 
-- `APP_VERSION` — the version this build reports (bump it on each release).
-- `VERSION_CHECK_URL` — a URL to a text file containing just the latest version,
+- `APP_VERSION` – the version this build reports (bump it on each release).
+- `VERSION_CHECK_URL` – a URL to a text file containing just the latest version,
   e.g. a raw `VERSION` file in your GitHub repo (`1.2.0` on one line).
-- `GITHUB_URL` — where users are sent to download a newer version.
+- `GITHUB_URL` – where users are sent to download a newer version.
 
 To publish a new release: update the code, bump `APP_VERSION`, and set the
 remote `VERSION` file to the same number.
