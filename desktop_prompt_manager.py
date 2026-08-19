@@ -777,37 +777,41 @@ class SettingsWindow:
         self.win = tk.Toplevel(self.root)
         self.win.title(APP_TITLE)
         self.win.configure(bg=COL_BG)
-        self.win.resizable(False, False)
+        self.win.resizable(False, True)  # height adjustable; content scrolls
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
-
-        # ---- Header (white bar with logo + title, like the original) ---------
-        header = tk.Frame(self.win, bg=COL_WHITE)
-        header.pack(fill="x")
-        head_inner = tk.Frame(header, bg=COL_WHITE)
-        head_inner.pack(anchor="w", padx=20, pady=15)
-
-        try:
-            tk.Label(head_inner, image=self._logo(22), bg=COL_WHITE).pack(side="left",
-                                                                          padx=(0, 8))
-        except Exception:
-            pass
-        tk.Label(head_inner, text=APP_TITLE, bg=COL_WHITE,
-                 fg=COL_FG, font=(UI_FONT, 13, "bold")).pack(side="left")
-        tk.Label(head_inner, text="–  Easily save, manage, and insert up to 10 "
-                 "custom AI prompts", bg=COL_WHITE, fg=COL_FG,
-                 font=(UI_FONT, 9)).pack(side="left", padx=(6, 0))
-
-        tk.Frame(self.win, height=1, bg=COL_SEP).pack(fill="x")
 
         # ---- Body holds swappable views: settings and (lazily) help ----------
         self.body = tk.Frame(self.win, bg=COL_BG)
         self.body.pack(fill="both", expand=True)
         self.help_content = None
 
-        # ---- Settings view ---------------------------------------------------
-        content = tk.Frame(self.body, bg=COL_BG)
+        # ---- Settings view: a vertically scrollable canvas -------------------
+        self.settings_content = tk.Frame(self.body, bg=COL_BG)
+        self.settings_content.pack(fill="both", expand=True)
+        canvas = tk.Canvas(self.settings_content, bg=COL_BG, highlightthickness=0,
+                           bd=0)
+        vscroll = ttk.Scrollbar(self.settings_content, orient="vertical",
+                                command=canvas.yview)
+        canvas.configure(yscrollcommand=vscroll.set)
+        vscroll.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        self._settings_canvas = canvas
+        self._settings_inner = tk.Frame(canvas, bg=COL_BG)
+        inner_id = canvas.create_window((0, 0), window=self._settings_inner,
+                                        anchor="nw")
+        self._settings_inner.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(inner_id, width=e.width))
+
+        def _on_wheel(e):
+            canvas.yview_scroll(int(-e.delta / 120), "units")
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_wheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        content = tk.Frame(self._settings_inner, bg=COL_BG)
         content.pack(fill="both", expand=True, padx=30, pady=20)
-        self.settings_content = content
 
         tk.Label(content, text="Settings", bg=COL_BG, fg=COL_FG,
                  font=(UI_FONT, 16, "bold")).pack(anchor="w", pady=(0, 15))
@@ -1002,10 +1006,22 @@ class SettingsWindow:
         self._add_hover(close, COL_YELLOW, COL_FG, COL_WHITE, COL_YELLOW)
         self.footer.pack(side="bottom", fill="x")
 
-        # Pin the window to the settings size so swapping to the help view
-        # (and back) doesn't make the window jump around.
+        # Size to the content but keep the whole window on screen; the settings
+        # area scrolls vertically when the content is taller than the screen.
         self.win.update_idletasks()
-        self.win.geometry(f"{self.win.winfo_reqwidth()}x{self.win.winfo_reqheight()}")
+        inner_w = self._settings_inner.winfo_reqwidth()
+        inner_h = self._settings_inner.winfo_reqheight()
+        footer_h = self.footer.winfo_reqheight()
+        screen_w = self.win.winfo_screenwidth()
+        screen_h = self.win.winfo_screenheight()
+        w = inner_w + 18  # + vertical scrollbar
+        max_h = screen_h - 120  # leave room for the taskbar and title bar
+        h = min(inner_h + footer_h, max_h)
+        x = max(0, (screen_w - w) // 2)
+        y = max(0, (screen_h - h) // 2 - 20)
+        self.win.geometry(f"{w}x{h}+{x}+{y}")
+        self.win.minsize(w, min(320, h))
+        self.win.maxsize(w, h)
         self.win.lift()
         self.win.focus_force()
 
@@ -1013,6 +1029,10 @@ class SettingsWindow:
     def _enter_help(self):
         if self.help_content is None:
             self.help_content = self._build_help_view(self.body)
+        try:
+            self._settings_canvas.unbind_all("<MouseWheel>")
+        except Exception:
+            pass
         self.settings_content.pack_forget()
         self.footer.pack_forget()
         self.help_content.pack(fill="both", expand=True)
@@ -1020,7 +1040,7 @@ class SettingsWindow:
     def _exit_help(self):
         if self.help_content is not None:
             self.help_content.pack_forget()
-        self.settings_content.pack(fill="both", expand=True, padx=30, pady=20)
+        self.settings_content.pack(fill="both", expand=True)
         self.footer.pack(side="bottom", fill="x")
 
     def _build_help_view(self, parent):
@@ -1256,6 +1276,10 @@ class SettingsWindow:
         )
 
     def _on_close(self):
+        try:
+            self._settings_canvas.unbind_all("<MouseWheel>")
+        except Exception:
+            pass
         if self.win is not None:
             self.win.destroy()
             self.win = None
