@@ -736,11 +736,6 @@ INTRO_PARA_2 = (
     "shortcut with the dropdowns next to it. The shortcuts work in any "
     "application, including Claude Desktop and ChatGPT Desktop."
 )
-SHORTCUT_INSTRUCTIONS = (
-    "Set each prompt's shortcut with the modifier and key dropdowns next to it. "
-    "Your changes are kept when you click Save Prompts or simply close this "
-    "window, and take effect immediately."
-)
 
 
 class SettingsWindow:
@@ -976,21 +971,6 @@ class SettingsWindow:
                           activebackground=COL_YELLOW, activeforeground=COL_WHITE)
         helpb.pack(side="left", padx=(15, 0))
         self._add_hover(helpb, COL_WHITE, COL_FG, COL_YELLOW, COL_WHITE)
-
-        # Bottom white instructions box
-        instr = tk.Frame(content, bg=COL_WHITE)
-        instr.pack(fill="x", pady=(30, 0))
-        instr_inner = tk.Frame(instr, bg=COL_WHITE)
-        instr_inner.pack(fill="x", padx=20, pady=20)
-        row = tk.Frame(instr_inner, bg=COL_WHITE)
-        row.pack(anchor="w")
-        try:
-            tk.Label(row, image=self._logo(14), bg=COL_WHITE).pack(
-                side="left", padx=(0, 6), anchor="n")
-        except Exception:
-            pass
-        tk.Label(row, text=SHORTCUT_INSTRUCTIONS, bg=COL_WHITE, fg=COL_FG,
-                 font=(UI_FONT, 9), justify="left", wraplength=520).pack(side="left")
 
         # Window footer with Close, matching the Help and About windows. It is
         # hidden while the inline help view is showing (that view has its own
