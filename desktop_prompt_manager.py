@@ -33,7 +33,7 @@ import urllib.request
 import urllib.error
 
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, ttk, filedialog
 
 import pyperclip
 from pynput import keyboard
@@ -220,8 +220,20 @@ def get_shortcuts() -> dict:
     return shortcuts
 
 
+def get_send_to_target() -> bool:
+    """Whether prompts are sent to a fixed target app instead of the focused one."""
+    return bool(_read_raw().get("send_to_target", False))
+
+
+def get_target_app_path() -> str:
+    """Path to the target application's executable (empty if none chosen)."""
+    v = _read_raw().get("target_app_path", "")
+    return v if isinstance(v, str) else ""
+
+
 def save_config(prompts: dict, append_clipboard=None, shortcuts=None,
-                password_warning=None) -> None:
+                password_warning=None, send_to_target=None,
+                target_app_path=None) -> None:
     """Persist prompts and optional settings, preserving other keys in the file."""
     raw = _read_raw()
     raw.update(prompts)
@@ -231,6 +243,10 @@ def save_config(prompts: dict, append_clipboard=None, shortcuts=None,
         raw["password_warning"] = bool(password_warning)
     if shortcuts is not None:
         raw["shortcuts"] = shortcuts
+    if send_to_target is not None:
+        raw["send_to_target"] = bool(send_to_target)
+    if target_app_path is not None:
+        raw["target_app_path"] = str(target_app_path)
     os.makedirs(config_dir(), exist_ok=True)
     with open(config_path(), "w", encoding="utf-8") as fh:
         json.dump(raw, fh, ensure_ascii=False, indent=2)
@@ -290,6 +306,123 @@ def _focus_window(hwnd) -> None:
         pass
 
 
+# Set by the GUI so a background paste can show an informational message.
+_notify_hook = None
+
+
+def set_notify_hook(func) -> None:
+    global _notify_hook
+    _notify_hook = func
+
+
+def _notify(message: str) -> None:
+    if _notify_hook is not None:
+        _notify_hook(message)
+
+
+def _find_window_for_exe(exe_path: str):
+    """Return a visible, titled top-level window owned by the given exe, or None
+    (Windows only)."""
+    if sys.platform != "win32" or not exe_path:
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        target_name = os.path.basename(exe_path).lower()
+        found = []
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+        def proc_name(pid):
+            h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not h:
+                return ""
+            try:
+                buf = ctypes.create_unicode_buffer(4096)
+                size = wintypes.DWORD(len(buf))
+                if kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                    return os.path.basename(buf.value).lower()
+            finally:
+                kernel32.CloseHandle(h)
+            return ""
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        def callback(hwnd, _lparam):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            if user32.GetWindowTextLengthW(hwnd) == 0:
+                return True  # skip tool/hidden windows without a title
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if proc_name(pid.value) == target_name:
+                found.append(hwnd)
+                return False  # stop enumerating
+            return True
+
+        user32.EnumWindows(callback, 0)
+        return found[0] if found else None
+    except Exception:
+        return None
+
+
+def _activate_target(exe_path: str, launch_if_closed: bool = True,
+                     timeout: float = 15.0) -> bool:
+    """Bring the target app's window to the foreground, launching it if needed.
+    Returns True when a window was focused (Windows only)."""
+    if sys.platform != "win32" or not exe_path:
+        return False
+    hwnd = _find_window_for_exe(exe_path)
+    if hwnd is None and launch_if_closed:
+        try:
+            import subprocess
+            subprocess.Popen([exe_path])
+        except Exception:
+            return False
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            time.sleep(0.4)
+            hwnd = _find_window_for_exe(exe_path)
+            if hwnd is not None:
+                time.sleep(0.8)  # let it finish loading and focus its input
+                break
+    if hwnd is None:
+        return False
+    _focus_window(hwnd)
+    time.sleep(0.25)
+    return True
+
+
+def _grab_selection() -> str:
+    """Copy the current selection (Ctrl+C) and return it; '' if nothing selected.
+
+    Uses an empty-clipboard sentinel so we only treat text as a selection when
+    Ctrl+C actually produced something — i.e. only when the user had text
+    selected at the moment the shortcut fired.
+    """
+    mod = keyboard.Key.cmd if sys.platform == "darwin" else keyboard.Key.ctrl
+    for key in (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r,
+                keyboard.Key.shift, keyboard.Key.shift_r):
+        try:
+            _kbd.release(key)
+        except Exception:
+            pass
+    try:
+        pyperclip.copy("")
+    except Exception:
+        pass
+    time.sleep(0.05)
+    with _kbd.pressed(mod):
+        _kbd.press("c")
+        _kbd.release("c")
+    time.sleep(0.15)
+    try:
+        sel = pyperclip.paste()
+        return sel if isinstance(sel, str) else ""
+    except Exception:
+        return ""
+
+
 def looks_like_password(s: str) -> bool:
     """Heuristic: does this single token look like a password/secret/API key?
 
@@ -331,11 +464,67 @@ def mask_secret(s: str) -> str:
     return f"{shown}   ({n} characters)"
 
 
+def _paste_selected(mod) -> None:
+    """Select-all then paste (replacing the field content)."""
+    with _kbd.pressed(mod):
+        _kbd.press("a")
+        _kbd.release("a")
+    time.sleep(0.02)
+    with _kbd.pressed(mod):
+        _kbd.press("v")
+        _kbd.release("v")
+
+
 def _insert_prompt(text: str, append_clipboard: bool = True,
-                   password_warning: bool = True) -> None:
+                   password_warning: bool = True, target_path: str = "") -> None:
     if not text:
         return
 
+    mod = keyboard.Key.cmd if sys.platform == "darwin" else keyboard.Key.ctrl
+
+    # ---- Target-app mode: grab the selection and paste into a fixed app ------
+    if target_path and sys.platform == "win32":
+        try:
+            saved_clip = pyperclip.paste()
+            if not isinstance(saved_clip, str):
+                saved_clip = ""
+        except Exception:
+            saved_clip = ""
+
+        # Auto-copy the current selection (only meaningful if we append it).
+        selection = _grab_selection() if append_clipboard else ""
+
+        if append_clipboard and password_warning and looks_like_password(selection):
+            if _confirm_hook is not None and not _confirm_hook(mask_secret(selection)):
+                try:
+                    pyperclip.copy(saved_clip)
+                except Exception:
+                    pass
+                return
+
+        combined = text + selection if append_clipboard else text
+
+        if not _activate_target(target_path, launch_if_closed=True):
+            _notify("Could not open the target app:\n\n" + target_path)
+            try:
+                pyperclip.copy(saved_clip)
+            except Exception:
+                pass
+            return
+
+        pyperclip.copy(combined)
+        time.sleep(0.05)
+        _paste_selected(mod)
+
+        # Restore the user's clipboard.
+        time.sleep(0.15)
+        try:
+            pyperclip.copy(saved_clip)
+        except Exception:
+            pass
+        return
+
+    # ---- OS-wide mode: paste into whatever window is focused -----------------
     # Remember which window is focused now (the target app), before any dialog
     # can steal focus, so we can hand it back before pasting.
     target_hwnd = _get_foreground_window()
@@ -413,8 +602,9 @@ def trigger(prompt_key: str) -> None:
     text = prompts.get(prompt_key, "")
     append = get_append_clipboard()
     warn = get_password_warning()
+    target = get_target_app_path() if get_send_to_target() else ""
     # Run the paste off the listener thread so we never block hotkey handling.
-    threading.Thread(target=_insert_prompt, args=(text, append, warn),
+    threading.Thread(target=_insert_prompt, args=(text, append, warn, target),
                      daemon=True).start()
 
 
@@ -624,6 +814,39 @@ class SettingsWindow:
             wraplength=560,
         ).pack(anchor="w", padx=(22, 0))
 
+        # Target-app option: send the prompt to a fixed app instead of the
+        # focused window (Windows only).
+        self.target_var = tk.BooleanVar(value=get_send_to_target())
+        self.target_path = get_target_app_path()
+        tgt = tk.Frame(content, bg=COL_BG)
+        tgt.pack(anchor="w", fill="x", pady=(10, 0))
+        tk.Checkbutton(
+            tgt,
+            text="Send prompts to a specific app instead of the focused window",
+            variable=self.target_var, bg=COL_BG, fg=COL_FG, font=(UI_FONT, 9),
+            activebackground=COL_BG, activeforeground=COL_FG,
+            selectcolor=COL_WHITE, anchor="w",
+        ).pack(anchor="w")
+        tk.Label(
+            tgt,
+            text=("When on: select text in your CAT tool, press a shortcut, and "
+                  "the prompt + selected text is pasted straight into the chosen "
+                  "app (it is launched if it isn't already running). Windows only."),
+            bg=COL_BG, fg=COL_FG, font=(UI_FONT, 8), justify="left",
+            wraplength=560,
+        ).pack(anchor="w", padx=(22, 0))
+        picker = tk.Frame(tgt, bg=COL_BG)
+        picker.pack(anchor="w", fill="x", padx=(22, 0), pady=(6, 0))
+        browse = tk.Button(picker, text="Browse…", command=self._browse_target,
+                           bg=COL_WHITE, fg=COL_FG, font=(UI_FONT, 9, "bold"),
+                           relief="solid", bd=1, padx=14, pady=4, cursor="hand2",
+                           activebackground=COL_YELLOW, activeforeground=COL_WHITE)
+        browse.pack(side="left")
+        self._add_hover(browse, COL_WHITE, COL_FG, COL_YELLOW, COL_WHITE)
+        self.target_label = tk.Label(picker, text=self._target_label_text(),
+                                     bg=COL_BG, fg=COL_FG, font=(UI_FONT, 8))
+        self.target_label.pack(side="left", padx=(10, 0))
+
         # Buttons
         btns = tk.Frame(content, bg=COL_BG)
         btns.pack(anchor="w", pady=(22, 0))
@@ -733,6 +956,18 @@ class SettingsWindow:
         widget.bind("<Enter>", lambda e: widget.configure(bg=hover_bg, fg=hover_fg))
         widget.bind("<Leave>", lambda e: widget.configure(bg=bg, fg=fg))
 
+    def _target_label_text(self) -> str:
+        return os.path.basename(self.target_path) if self.target_path \
+            else "(no app selected)"
+
+    def _browse_target(self):
+        path = filedialog.askopenfilename(
+            parent=self.win, title="Select the target application",
+            filetypes=[("Programs", "*.exe"), ("All files", "*.*")])
+        if path:
+            self.target_path = path
+            self.target_label.config(text=self._target_label_text())
+
     def _collect_shortcuts(self):
         """Build {prompt_key: pynput combo} from the dropdowns."""
         shortcuts = {}
@@ -765,8 +1000,19 @@ class SettingsWindow:
             ):
                 return
 
+        # If target mode is on but no app was chosen, it silently falls back to
+        # the focused window — let the user know.
+        if self.target_var.get() and not self.target_path:
+            messagebox.showwarning(
+                "Desktop Prompt Manager",
+                "Target-app mode is on but no application is selected. Use "
+                "Browse… to pick one, otherwise prompts go to the focused "
+                "window as usual.", parent=self.win)
+
         save_config(prompts, append_clipboard=self.append_var.get(),
-                    shortcuts=shortcuts, password_warning=self.pw_warn_var.get())
+                    shortcuts=shortcuts, password_warning=self.pw_warn_var.get(),
+                    send_to_target=self.target_var.get(),
+                    target_app_path=self.target_path)
         if self.on_shortcuts_changed:
             self.on_shortcuts_changed()
         messagebox.showinfo("Desktop Prompt Manager", "✅ Prompts saved.", parent=self.win)
@@ -781,8 +1027,12 @@ class SettingsWindow:
             self.key_vars[key].set(key_token_to_display(token))
         self.append_var.set(True)
         self.pw_warn_var.set(True)
+        self.target_var.set(False)
+        self.target_path = ""
+        self.target_label.config(text=self._target_label_text())
         save_config(dict(DEFAULT_PROMPTS), append_clipboard=True,
-                    shortcuts=dict(DEFAULT_SHORTCUTS), password_warning=True)
+                    shortcuts=dict(DEFAULT_SHORTCUTS), password_warning=True,
+                    send_to_target=False, target_app_path="")
         if self.on_shortcuts_changed:
             self.on_shortcuts_changed()
         messagebox.showinfo(
@@ -809,7 +1059,11 @@ FALLBACK_HELP = (
     "Copy a snippet, press a shortcut, and the prompt is inserted with your "
     "copied text right after it. Toggle in Settings.\n\n"
     "## Password safety net\n"
-    "Warns before pasting copied text that looks like a password or secret.\n"
+    "Warns before pasting copied text that looks like a password or secret.\n\n"
+    "## Send to a specific app\n"
+    "Optionally route prompts to one fixed app (e.g. Claude Desktop) instead of "
+    "the focused window: pick its .exe in Settings, then select text and press a "
+    "shortcut to paste prompt + selection straight into it. Windows only.\n"
 )
 
 
@@ -1157,8 +1411,9 @@ class App:
         self.settings = SettingsWindow(self.root,
                                        on_shortcuts_changed=self.reload_hotkeys)
 
-        # Let a background paste ask for confirmation on the Tk thread.
+        # Let a background paste ask for confirmation / show messages on Tk.
         set_confirm_hook(self._confirm_paste)
+        set_notify_hook(self._notify)
 
         self.hotkeys = build_hotkeys()
         self.icon = pystray.Icon(
@@ -1182,6 +1437,11 @@ class App:
 
     def _open_about(self, icon=None, item=None):
         self.root.after(0, self.about.show)
+
+    def _notify(self, message: str):
+        """Show an informational message from a background thread, on the Tk thread."""
+        self.root.after(0, lambda: messagebox.showwarning(
+            "Desktop Prompt Manager", message))
 
     def reload_hotkeys(self):
         """Rebuild the global hotkey listener after the user changes shortcuts."""

@@ -57,6 +57,28 @@ it is pasted; sentences, URLs and e-mail addresses are never flagged. Toggle it
 with the **"Warn before pasting text that looks like a password"** checkbox in
 Settings.
 
+## Send to a specific app (target mode)
+
+By default a prompt is pasted into **whatever window is focused** — the app
+works OS-wide. Optionally you can route prompts to **one fixed app** instead:
+
+1. In Settings, tick **"Send prompts to a specific app instead of the focused
+   window"** and pick the program's `.exe` with **Browse…** (e.g. Claude
+   Desktop's `Claude.exe`).
+2. Now, while translating: select a snippet in your CAT tool and press a
+   shortcut (e.g. `Ctrl+Shift+F3`).
+3. The app copies your selection, brings the target app to the front (launching
+   it first if it isn't running), and pastes `Translate: <your selection>` into
+   it — all in one keystroke. Your original clipboard is restored afterwards.
+
+The selection is only picked up at the moment you press the shortcut, so nothing
+is copied behind your back. This mode is **Windows only**; with it off the app
+behaves OS-wide as before.
+
+> Launching a closed app is best-effort: Electron apps like Claude Desktop take
+> a few seconds to start and focus their input, so give it a moment. Focusing an
+> app that is already running is instant and reliable.
+
 ## Help window
 
 Right-click the tray icon and choose **Help** (or click **Help** in Settings) to
