@@ -661,6 +661,21 @@ class SettingsWindow:
         tk.Label(row, text=SHORTCUT_INSTRUCTIONS, bg=COL_WHITE, fg=COL_FG,
                  font=(UI_FONT, 9), justify="left", wraplength=520).pack(side="left")
 
+        # Window footer with Close, matching the Help and About windows. It is
+        # hidden while the inline help view is showing (that view has its own
+        # "Back to settings" button in the same spot).
+        self.footer = tk.Frame(self.win, bg=COL_BG)
+        tk.Frame(self.footer, height=1, bg=COL_SEP).pack(fill="x")
+        footer_inner = tk.Frame(self.footer, bg=COL_BG)
+        footer_inner.pack(fill="x")
+        close = tk.Button(footer_inner, text="Close", command=self._on_close,
+                          bg=COL_YELLOW, fg=COL_FG, font=(UI_FONT, 10, "bold"),
+                          relief="flat", bd=0, padx=22, pady=8, cursor="hand2",
+                          activebackground=COL_WHITE, activeforeground=COL_YELLOW)
+        close.pack(side="right", padx=20, pady=12)
+        self._add_hover(close, COL_YELLOW, COL_FG, COL_WHITE, COL_YELLOW)
+        self.footer.pack(side="bottom", fill="x")
+
         # Pin the window to the settings size so swapping to the help view
         # (and back) doesn't make the window jump around.
         self.win.update_idletasks()
@@ -673,12 +688,14 @@ class SettingsWindow:
         if self.help_content is None:
             self.help_content = self._build_help_view(self.body)
         self.settings_content.pack_forget()
+        self.footer.pack_forget()
         self.help_content.pack(fill="both", expand=True)
 
     def _exit_help(self):
         if self.help_content is not None:
             self.help_content.pack_forget()
         self.settings_content.pack(fill="both", expand=True, padx=30, pady=20)
+        self.footer.pack(side="bottom", fill="x")
 
     def _build_help_view(self, parent):
         frame = tk.Frame(parent, bg=COL_BG)
