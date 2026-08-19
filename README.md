@@ -20,8 +20,9 @@ Default scheme (each shortcut is **customizable** in Settings):
 Function keys are the default because they rarely clash with the target app's
 own shortcuts (Claude Desktop included). In Settings each prompt has two
 dropdowns — a modifier preset (Ctrl+Shift, Ctrl+Alt, Alt, …) and a key
-(0–9, F1–F12, A–Z) — so you can reassign any shortcut. Changes take effect
-immediately on Save; duplicates are flagged.
+(0–9, F1–F12, A–Z) — so you can reassign any shortcut. Settings are kept when
+you click **Save Prompts** or simply close the window, and take effect
+immediately; duplicate shortcuts are flagged on Save.
 
 On macOS the trigger is still `Ctrl+Shift+…`; the paste is sent as `Cmd+V`.
 

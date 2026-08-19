@@ -737,8 +737,9 @@ INTRO_PARA_2 = (
     "application, including Claude Desktop and ChatGPT Desktop."
 )
 SHORTCUT_INSTRUCTIONS = (
-    "Set each prompt's shortcut with the modifier and key dropdowns next to it, "
-    "then click Save Prompts to apply. Changes take effect immediately."
+    "Set each prompt's shortcut with the modifier and key dropdowns next to it. "
+    "Your changes are kept when you click Save Prompts or simply close this "
+    "window, and take effect immediately."
 )
 
 
@@ -1213,11 +1214,18 @@ class SettingsWindow:
             shortcuts[key] = parts_to_combo(mods, token)
         return shortcuts
 
-    def _save(self):
-        prompts = {}
-        for key, entry in self.entries.items():
-            prompts[key] = entry.get().strip()
+    def _persist(self):
+        """Write all current settings to disk and reload the hotkeys."""
+        prompts = {key: entry.get().strip() for key, entry in self.entries.items()}
+        shortcuts = self._collect_shortcuts()
+        save_config(prompts, append_clipboard=self.append_var.get(),
+                    shortcuts=shortcuts, password_warning=self.pw_warn_var.get(),
+                    send_to_target=self.target_var.get(),
+                    target=self.target if self.target is not None else {})
+        if self.on_shortcuts_changed:
+            self.on_shortcuts_changed()
 
+    def _save(self):
         shortcuts = self._collect_shortcuts()
 
         # Warn about duplicate shortcuts (only one of them would ever fire).
@@ -1245,12 +1253,7 @@ class SettingsWindow:
                 "“Pick installed app…” or “Browse .exe…”, otherwise prompts go "
                 "to the focused window as usual.", parent=self.win)
 
-        save_config(prompts, append_clipboard=self.append_var.get(),
-                    shortcuts=shortcuts, password_warning=self.pw_warn_var.get(),
-                    send_to_target=self.target_var.get(),
-                    target=self.target if self.target is not None else {})
-        if self.on_shortcuts_changed:
-            self.on_shortcuts_changed()
+        self._persist()
         messagebox.showinfo("Desktop Prompt Manager", "✅ Prompts saved.", parent=self.win)
 
     def _reset(self):
@@ -1276,6 +1279,11 @@ class SettingsWindow:
         )
 
     def _on_close(self):
+        # Closing the window keeps your changes — no need to click Save first.
+        try:
+            self._persist()
+        except Exception:
+            pass
         try:
             self._settings_canvas.unbind_all("<MouseWheel>")
         except Exception:
