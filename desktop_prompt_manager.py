@@ -225,16 +225,42 @@ def get_send_to_target() -> bool:
     return bool(_read_raw().get("send_to_target", False))
 
 
-def get_target_app_path() -> str:
-    """Path to the target application's executable (empty if none chosen)."""
-    v = _read_raw().get("target_app_path", "")
-    return v if isinstance(v, str) else ""
+def stored_target():
+    """The stored target app dict regardless of whether target mode is enabled.
+
+    dict keys: kind ("exe"|"appx"), proc (process basename for window matching),
+    label (display name), and either path (exe) or aumid (Store app).
+    """
+    raw = _read_raw()
+    kind = raw.get("target_kind", "exe")
+    proc = raw.get("target_proc", "") or ""
+    label = raw.get("target_label", "") or ""
+    if kind == "appx":
+        aumid = raw.get("target_aumid", "") or ""
+        if not aumid:
+            return None
+        return {"kind": "appx", "aumid": aumid, "proc": proc,
+                "label": label or aumid}
+    path = raw.get("target_app_path", "") or ""
+    if not path:
+        return None
+    return {"kind": "exe", "path": path, "proc": proc or os.path.basename(path),
+            "label": label or os.path.basename(path)}
+
+
+def get_target():
+    """The active target dict, or None if target mode is disabled/unset."""
+    if not _read_raw().get("send_to_target"):
+        return None
+    return stored_target()
 
 
 def save_config(prompts: dict, append_clipboard=None, shortcuts=None,
-                password_warning=None, send_to_target=None,
-                target_app_path=None) -> None:
-    """Persist prompts and optional settings, preserving other keys in the file."""
+                password_warning=None, send_to_target=None, target=None) -> None:
+    """Persist prompts and optional settings, preserving other keys in the file.
+
+    `target` is a dict like get_target() returns (or None to leave unchanged).
+    """
     raw = _read_raw()
     raw.update(prompts)
     if append_clipboard is not None:
@@ -245,8 +271,12 @@ def save_config(prompts: dict, append_clipboard=None, shortcuts=None,
         raw["shortcuts"] = shortcuts
     if send_to_target is not None:
         raw["send_to_target"] = bool(send_to_target)
-    if target_app_path is not None:
-        raw["target_app_path"] = str(target_app_path)
+    if target is not None:
+        raw["target_kind"] = target.get("kind", "exe")
+        raw["target_app_path"] = target.get("path", "")
+        raw["target_aumid"] = target.get("aumid", "")
+        raw["target_proc"] = target.get("proc", "")
+        raw["target_label"] = target.get("label", "")
     os.makedirs(config_dir(), exist_ok=True)
     with open(config_path(), "w", encoding="utf-8") as fh:
         json.dump(raw, fh, ensure_ascii=False, indent=2)
@@ -366,23 +396,87 @@ def _find_window_for_exe(exe_path: str):
         return None
 
 
-def _activate_target(exe_path: str, launch_if_closed: bool = True,
-                     timeout: float = 15.0) -> bool:
+def _run_powershell(script: str, timeout: float = 25.0) -> str:
+    """Run a PowerShell snippet without a visible console; return stdout."""
+    if sys.platform != "win32":
+        return ""
+    try:
+        import subprocess
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive",
+             "-ExecutionPolicy", "Bypass", "-Command", script],
+            capture_output=True, text=True, timeout=timeout,
+            startupinfo=si, creationflags=0x08000000)  # CREATE_NO_WINDOW
+        return out.stdout or ""
+    except Exception:
+        return ""
+
+
+def list_start_apps():
+    """Return [(name, appid)] of launchable apps (Store + desktop), sorted."""
+    out = _run_powershell(
+        "Get-StartApps | Select-Object Name,AppID | ConvertTo-Json -Compress")
+    try:
+        data = json.loads(out)
+    except Exception:
+        return []
+    if isinstance(data, dict):
+        data = [data]
+    apps = [(d["Name"], d["AppID"]) for d in data
+            if d.get("Name") and d.get("AppID")]
+    apps.sort(key=lambda x: x[0].lower())
+    return apps
+
+
+def resolve_appx_exe(aumid: str) -> str:
+    """Return the process basename (e.g. 'Claude.exe') for a Store app AUMID."""
+    if "!" not in aumid:
+        return ""
+    pfn, _, appid = aumid.partition("!")
+    script = (
+        "$p=Get-AppxPackage | Where-Object {$_.PackageFamilyName -eq '%s'} "
+        "| Select-Object -First 1;"
+        "$a=(Get-AppxPackageManifest $p).Package.Applications.Application "
+        "| Where-Object {$_.Id -eq '%s'} | Select-Object -First 1;"
+        "[System.IO.Path]::GetFileName($a.Executable)" % (pfn, appid)
+    )
+    return _run_powershell(script).strip()
+
+
+def _launch_appx(aumid: str) -> None:
+    """Launch a Store (packaged) app by its AppUserModelID via the shell."""
+    try:
+        import subprocess
+        subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{aumid}"])
+    except Exception:
+        pass
+
+
+def _activate_target(target: dict, timeout: float = 15.0) -> bool:
     """Bring the target app's window to the foreground, launching it if needed.
     Returns True when a window was focused (Windows only)."""
-    if sys.platform != "win32" or not exe_path:
+    if sys.platform != "win32" or not target:
         return False
-    hwnd = _find_window_for_exe(exe_path)
-    if hwnd is None and launch_if_closed:
-        try:
-            import subprocess
-            subprocess.Popen([exe_path])
-        except Exception:
+    proc = target.get("proc", "")
+    hwnd = _find_window_for_exe(proc) if proc else None
+    if hwnd is None:
+        # Not running (or no proc name to match): launch it.
+        if target.get("kind") == "appx":
+            _launch_appx(target.get("aumid", ""))
+        elif target.get("path"):
+            try:
+                import subprocess
+                subprocess.Popen([target["path"]])
+            except Exception:
+                return False
+        else:
             return False
         deadline = time.time() + timeout
         while time.time() < deadline:
             time.sleep(0.4)
-            hwnd = _find_window_for_exe(exe_path)
+            hwnd = _find_window_for_exe(proc) if proc else None
             if hwnd is not None:
                 time.sleep(0.8)  # let it finish loading and focus its input
                 break
@@ -476,14 +570,14 @@ def _paste_selected(mod) -> None:
 
 
 def _insert_prompt(text: str, append_clipboard: bool = True,
-                   password_warning: bool = True, target_path: str = "") -> None:
+                   password_warning: bool = True, target=None) -> None:
     if not text:
         return
 
     mod = keyboard.Key.cmd if sys.platform == "darwin" else keyboard.Key.ctrl
 
     # ---- Target-app mode: grab the selection and paste into a fixed app ------
-    if target_path and sys.platform == "win32":
+    if target and sys.platform == "win32":
         try:
             saved_clip = pyperclip.paste()
             if not isinstance(saved_clip, str):
@@ -504,8 +598,10 @@ def _insert_prompt(text: str, append_clipboard: bool = True,
 
         combined = text + selection if append_clipboard else text
 
-        if not _activate_target(target_path, launch_if_closed=True):
-            _notify("Could not open the target app:\n\n" + target_path)
+        if not _activate_target(target):
+            _notify("Could not open the target app:\n\n"
+                    + (target.get("label") or target.get("path") or
+                       target.get("aumid") or "?"))
             try:
                 pyperclip.copy(saved_clip)
             except Exception:
@@ -602,7 +698,7 @@ def trigger(prompt_key: str) -> None:
     text = prompts.get(prompt_key, "")
     append = get_append_clipboard()
     warn = get_password_warning()
-    target = get_target_app_path() if get_send_to_target() else ""
+    target = get_target()
     # Run the paste off the listener thread so we never block hotkey handling.
     threading.Thread(target=_insert_prompt, args=(text, append, warn, target),
                      daemon=True).start()
@@ -817,7 +913,7 @@ class SettingsWindow:
         # Target-app option: send the prompt to a fixed app instead of the
         # focused window (Windows only).
         self.target_var = tk.BooleanVar(value=get_send_to_target())
-        self.target_path = get_target_app_path()
+        self.target = stored_target()  # dict or None
         tgt = tk.Frame(content, bg=COL_BG)
         tgt.pack(anchor="w", fill="x", pady=(10, 0))
         tk.Checkbutton(
@@ -837,11 +933,18 @@ class SettingsWindow:
         ).pack(anchor="w", padx=(22, 0))
         picker = tk.Frame(tgt, bg=COL_BG)
         picker.pack(anchor="w", fill="x", padx=(22, 0), pady=(6, 0))
-        browse = tk.Button(picker, text="Browse…", command=self._browse_target,
+        pick = tk.Button(picker, text="Pick installed app…",
+                         command=self._pick_installed_app, bg=COL_WHITE, fg=COL_FG,
+                         font=(UI_FONT, 9, "bold"), relief="solid", bd=1, padx=14,
+                         pady=4, cursor="hand2", activebackground=COL_YELLOW,
+                         activeforeground=COL_WHITE)
+        pick.pack(side="left")
+        self._add_hover(pick, COL_WHITE, COL_FG, COL_YELLOW, COL_WHITE)
+        browse = tk.Button(picker, text="Browse .exe…", command=self._browse_target,
                            bg=COL_WHITE, fg=COL_FG, font=(UI_FONT, 9, "bold"),
                            relief="solid", bd=1, padx=14, pady=4, cursor="hand2",
                            activebackground=COL_YELLOW, activeforeground=COL_WHITE)
-        browse.pack(side="left")
+        browse.pack(side="left", padx=(8, 0))
         self._add_hover(browse, COL_WHITE, COL_FG, COL_YELLOW, COL_WHITE)
         self.target_label = tk.Label(picker, text=self._target_label_text(),
                                      bg=COL_BG, fg=COL_FG, font=(UI_FONT, 8))
@@ -957,16 +1060,129 @@ class SettingsWindow:
         widget.bind("<Leave>", lambda e: widget.configure(bg=bg, fg=fg))
 
     def _target_label_text(self) -> str:
-        return os.path.basename(self.target_path) if self.target_path \
-            else "(no app selected)"
+        if not self.target:
+            return "(no app selected)"
+        kind = "Store app" if self.target.get("kind") == "appx" else "program"
+        return f"{self.target.get('label', '?')}  ({kind})"
 
     def _browse_target(self):
         path = filedialog.askopenfilename(
             parent=self.win, title="Select the target application",
             filetypes=[("Programs", "*.exe"), ("All files", "*.*")])
         if path:
-            self.target_path = path
+            self.target = {"kind": "exe", "path": path,
+                           "proc": os.path.basename(path),
+                           "label": os.path.basename(path)}
             self.target_label.config(text=self._target_label_text())
+
+    def _pick_installed_app(self):
+        self.win.config(cursor="watch")
+        self.win.update()
+        apps = list_start_apps()
+        self.win.config(cursor="")
+        if not apps:
+            messagebox.showwarning(
+                "Desktop Prompt Manager",
+                "Could not list installed apps. Use “Browse .exe…” instead.",
+                parent=self.win)
+            return
+        choice = self._app_chooser(apps)
+        if not choice:
+            return
+        name, appid = choice
+        if "!" in appid:  # packaged / Store app -> AUMID
+            self.win.config(cursor="watch")
+            self.win.update()
+            proc = resolve_appx_exe(appid)
+            self.win.config(cursor="")
+            self.target = {"kind": "appx", "aumid": appid, "proc": proc,
+                           "label": name}
+        elif appid.lower().endswith(".exe") and (os.sep in appid or "/" in appid):
+            self.target = {"kind": "exe", "path": appid,
+                           "proc": os.path.basename(appid), "label": name}
+        else:
+            messagebox.showinfo(
+                "Desktop Prompt Manager",
+                f"“{name}” isn't a Store app. Use “Browse .exe…” "
+                "to point at its program file instead.", parent=self.win)
+            return
+        self.target_label.config(text=self._target_label_text())
+
+    def _app_chooser(self, apps):
+        """Modal filterable list of installed apps; returns (name, appid) or None."""
+        dlg = tk.Toplevel(self.win)
+        dlg.title("Pick an installed app")
+        dlg.configure(bg=COL_BG)
+        dlg.transient(self.win)
+        dlg.grab_set()
+        result = {"choice": None}
+
+        tk.Label(dlg, text="Type to filter, then choose an app:", bg=COL_BG,
+                 fg=COL_FG, font=(UI_FONT, 9)).pack(anchor="w", padx=16, pady=(14, 4))
+        filt = tk.Entry(dlg, font=(UI_FONT, 10), bg=COL_WHITE, fg=COL_INPUT_TEXT,
+                        relief="flat", bd=0, highlightthickness=2,
+                        highlightbackground=COL_BORDER, highlightcolor=COL_FOCUS,
+                        insertbackground=COL_INPUT_TEXT)
+        filt.pack(fill="x", padx=16, ipady=4)
+
+        listframe = tk.Frame(dlg, bg=COL_WHITE)
+        listframe.pack(fill="both", expand=True, padx=16, pady=(8, 0))
+        scroll = ttk.Scrollbar(listframe, orient="vertical")
+        scroll.pack(side="right", fill="y")
+        lb = tk.Listbox(listframe, height=14, activestyle="none",
+                        font=(UI_FONT, 10), bg=COL_WHITE, fg=COL_INPUT_TEXT,
+                        yscrollcommand=scroll.set, highlightthickness=0, bd=0,
+                        selectbackground=COL_YELLOW, selectforeground=COL_FG)
+        lb.pack(side="left", fill="both", expand=True)
+        scroll.config(command=lb.yview)
+
+        shown = []
+
+        def refill(*_):
+            q = filt.get().strip().lower()
+            lb.delete(0, tk.END)
+            shown.clear()
+            for name, appid in apps:
+                if q in name.lower():
+                    shown.append((name, appid))
+                    lb.insert(tk.END, name)
+            if shown:
+                lb.selection_set(0)
+
+        def choose(*_):
+            sel = lb.curselection()
+            if sel:
+                result["choice"] = shown[sel[0]]
+                dlg.destroy()
+
+        def cancel(*_):
+            dlg.destroy()
+
+        filt.bind("<KeyRelease>", refill)
+        lb.bind("<Double-Button-1>", choose)
+        dlg.bind("<Return>", choose)
+        dlg.bind("<Escape>", cancel)
+        refill()
+
+        btns = tk.Frame(dlg, bg=COL_BG)
+        btns.pack(fill="x", padx=16, pady=12)
+        ok = tk.Button(btns, text="Select", command=choose, bg=COL_YELLOW,
+                       fg=COL_FG, font=(UI_FONT, 10, "bold"), relief="flat", bd=0,
+                       padx=18, pady=6, cursor="hand2", activebackground=COL_WHITE,
+                       activeforeground=COL_YELLOW)
+        ok.pack(side="right")
+        self._add_hover(ok, COL_YELLOW, COL_FG, COL_WHITE, COL_YELLOW)
+        cancelb = tk.Button(btns, text="Cancel", command=cancel, bg=COL_WHITE,
+                            fg=COL_FG, font=(UI_FONT, 10, "bold"), relief="solid",
+                            bd=1, padx=18, pady=6, cursor="hand2",
+                            activebackground=COL_YELLOW, activeforeground=COL_WHITE)
+        cancelb.pack(side="right", padx=(0, 8))
+        self._add_hover(cancelb, COL_WHITE, COL_FG, COL_YELLOW, COL_WHITE)
+
+        dlg.geometry("380x430")
+        filt.focus_set()
+        dlg.wait_window()
+        return result["choice"]
 
     def _collect_shortcuts(self):
         """Build {prompt_key: pynput combo} from the dropdowns."""
@@ -1002,17 +1218,17 @@ class SettingsWindow:
 
         # If target mode is on but no app was chosen, it silently falls back to
         # the focused window — let the user know.
-        if self.target_var.get() and not self.target_path:
+        if self.target_var.get() and not self.target:
             messagebox.showwarning(
                 "Desktop Prompt Manager",
                 "Target-app mode is on but no application is selected. Use "
-                "Browse… to pick one, otherwise prompts go to the focused "
-                "window as usual.", parent=self.win)
+                "“Pick installed app…” or “Browse .exe…”, otherwise prompts go "
+                "to the focused window as usual.", parent=self.win)
 
         save_config(prompts, append_clipboard=self.append_var.get(),
                     shortcuts=shortcuts, password_warning=self.pw_warn_var.get(),
                     send_to_target=self.target_var.get(),
-                    target_app_path=self.target_path)
+                    target=self.target if self.target is not None else {})
         if self.on_shortcuts_changed:
             self.on_shortcuts_changed()
         messagebox.showinfo("Desktop Prompt Manager", "✅ Prompts saved.", parent=self.win)
@@ -1028,11 +1244,11 @@ class SettingsWindow:
         self.append_var.set(True)
         self.pw_warn_var.set(True)
         self.target_var.set(False)
-        self.target_path = ""
+        self.target = None
         self.target_label.config(text=self._target_label_text())
         save_config(dict(DEFAULT_PROMPTS), append_clipboard=True,
                     shortcuts=dict(DEFAULT_SHORTCUTS), password_warning=True,
-                    send_to_target=False, target_app_path="")
+                    send_to_target=False, target={})
         if self.on_shortcuts_changed:
             self.on_shortcuts_changed()
         messagebox.showinfo(

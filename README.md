@@ -63,8 +63,12 @@ By default a prompt is pasted into **whatever window is focused** — the app
 works OS-wide. Optionally you can route prompts to **one fixed app** instead:
 
 1. In Settings, tick **"Send prompts to a specific app instead of the focused
-   window"** and pick the program's `.exe` with **Browse…** (e.g. Claude
-   Desktop's `Claude.exe`).
+   window"** and choose the app in one of two ways:
+   - **Pick installed app…** — a searchable list of installed apps, including
+     **Microsoft Store apps** such as Claude Desktop (matched and launched by
+     its app id, so store-app updates don't break it).
+   - **Browse .exe…** — point directly at a program's `.exe` (for standalone,
+     non-store installs).
 2. Now, while translating: select a snippet in your CAT tool and press a
    shortcut (e.g. `Ctrl+Shift+F3`).
 3. The app copies your selection, brings the target app to the front (launching
