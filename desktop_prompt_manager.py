@@ -522,6 +522,28 @@ def _grab_selection() -> str:
         return ""
 
 
+# Cache of the last non-empty selection. Reused when a re-trigger finds nothing
+# selected — i.e. when you correct a mis-pressed shortcut after the focus has
+# already moved to the target app, so the source selection is out of reach.
+_sel_cache_text = ""
+_sel_cache_time = 0.0
+SELECTION_REUSE_SECONDS = 60
+
+
+def _select_for_target() -> str:
+    """Grab the current selection; if nothing is selected, fall back to the
+    last grabbed selection (a correction after focus moved to the target)."""
+    global _sel_cache_text, _sel_cache_time
+    grabbed = _grab_selection()
+    if grabbed:
+        _sel_cache_text = grabbed
+        _sel_cache_time = time.time()
+        return grabbed
+    if _sel_cache_text and (time.time() - _sel_cache_time) <= SELECTION_REUSE_SECONDS:
+        return _sel_cache_text
+    return ""
+
+
 def looks_like_password(s: str) -> bool:
     """Heuristic: does this single token look like a password/secret/API key?
 
@@ -604,7 +626,9 @@ def _insert_prompt(text: str, append_clipboard: bool = True,
             saved_clip = ""
 
         # Auto-copy the current selection (only meaningful if we append it).
-        selection = _grab_selection() if append_clipboard else ""
+        # If nothing is selected now (e.g. a correction after focus already
+        # moved here), reuse the selection grabbed by the previous press.
+        selection = _select_for_target() if append_clipboard else ""
 
         if append_clipboard and password_warning and looks_like_password(selection):
             if _confirm_hook is not None and not _confirm_hook(mask_secret(selection)):
@@ -710,26 +734,16 @@ def _insert_prompt(text: str, append_clipboard: bool = True,
         pass
 
 
-# Debounce rapid shortcut presses. If you hit the wrong shortcut and then the
-# right one straight after, only the last press runs — and it grabs the
-# selection while the source app is still focused, before any focus switch.
-TRIGGER_DEBOUNCE = 0.30  # seconds
-_pending_timer = None
-_pending_lock = threading.Lock()
+# Serialize insertions so two presses never interleave their simulated
+# keystrokes. A mis-pressed shortcut and the correction both run (the last one
+# wins); the correction reuses the selection the first press grabbed, so no
+# debounce delay is needed. See _select_for_target.
 _run_lock = threading.Lock()
 
 
 def trigger(prompt_key: str) -> None:
-    """Schedule a prompt insertion, cancelling any press still within the
-    debounce window so a quick correction supersedes the mistaken press."""
-    global _pending_timer
-    with _pending_lock:
-        if _pending_timer is not None:
-            _pending_timer.cancel()
-        _pending_timer = threading.Timer(TRIGGER_DEBOUNCE, _run_trigger,
-                                         args=(prompt_key,))
-        _pending_timer.daemon = True
-        _pending_timer.start()
+    """Run a prompt insertion off the listener thread (serialized)."""
+    threading.Thread(target=_run_trigger, args=(prompt_key,), daemon=True).start()
 
 
 def _run_trigger(prompt_key: str) -> None:
