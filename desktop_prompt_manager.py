@@ -569,6 +569,19 @@ def _paste_selected(mod) -> None:
         _kbd.release("v")
 
 
+def _combine(prompt: str, extra: str) -> str:
+    """Join a trigger prompt with the appended text, guaranteeing a single
+    space between them (e.g. 'Rephrase:' + 'text' -> 'Rephrase: text').
+
+    The prompt is stored stripped, so we can't rely on a trailing space.
+    """
+    if not extra:
+        return prompt
+    if prompt and not prompt[-1].isspace():
+        return prompt + " " + extra
+    return prompt + extra
+
+
 def _insert_prompt(text: str, append_clipboard: bool = True,
                    password_warning: bool = True, target=None) -> None:
     if not text:
@@ -596,7 +609,7 @@ def _insert_prompt(text: str, append_clipboard: bool = True,
                     pass
                 return
 
-        combined = text + selection if append_clipboard else text
+        combined = _combine(text, selection) if append_clipboard else text
 
         if not _activate_target(target):
             _notify("Could not open the target app:\n\n"
@@ -643,7 +656,7 @@ def _insert_prompt(text: str, append_clipboard: bool = True,
                 return  # user declined; clipboard is left untouched
             refocus = True  # the dialog stole focus from the target app
 
-    combined = text + original if append_clipboard else text
+    combined = _combine(text, original) if append_clipboard else text
     pyperclip.copy(combined)
     # Give the clipboard a moment to settle.
     time.sleep(0.03)
