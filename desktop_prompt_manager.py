@@ -325,6 +325,11 @@ def _focus_window(hwnd) -> None:
         import ctypes
         user32 = ctypes.windll.user32
         kernel32 = ctypes.windll.kernel32
+        # A minimized window (e.g. after Win+D) counts as visible but stays
+        # collapsed under SetForegroundWindow, so restore it first — otherwise
+        # its input field never gets focus and the paste goes nowhere.
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
         cur = kernel32.GetCurrentThreadId()
         target = user32.GetWindowThreadProcessId(hwnd, None)
         # Attaching input queues lets us hand foreground back reliably.
