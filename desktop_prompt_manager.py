@@ -705,16 +705,38 @@ def _insert_prompt(text: str, append_clipboard: bool = True,
         pass
 
 
+# Debounce rapid shortcut presses. If you hit the wrong shortcut and then the
+# right one straight after, only the last press runs — and it grabs the
+# selection while the source app is still focused, before any focus switch.
+TRIGGER_DEBOUNCE = 0.30  # seconds
+_pending_timer = None
+_pending_lock = threading.Lock()
+_run_lock = threading.Lock()
+
+
 def trigger(prompt_key: str) -> None:
-    """Look up the prompt fresh (so edits apply live) and insert it."""
-    prompts = load_config()
-    text = prompts.get(prompt_key, "")
-    append = get_append_clipboard()
-    warn = get_password_warning()
-    target = get_target()
-    # Run the paste off the listener thread so we never block hotkey handling.
-    threading.Thread(target=_insert_prompt, args=(text, append, warn, target),
-                     daemon=True).start()
+    """Schedule a prompt insertion, cancelling any press still within the
+    debounce window so a quick correction supersedes the mistaken press."""
+    global _pending_timer
+    with _pending_lock:
+        if _pending_timer is not None:
+            _pending_timer.cancel()
+        _pending_timer = threading.Timer(TRIGGER_DEBOUNCE, _run_trigger,
+                                         args=(prompt_key,))
+        _pending_timer.daemon = True
+        _pending_timer.start()
+
+
+def _run_trigger(prompt_key: str) -> None:
+    # Look up the prompt fresh (so edits apply live). The run lock keeps two
+    # insertions from ever interleaving their simulated keystrokes.
+    with _run_lock:
+        prompts = load_config()
+        text = prompts.get(prompt_key, "")
+        append = get_append_clipboard()
+        warn = get_password_warning()
+        target = get_target()
+        _insert_prompt(text, append, warn, target)
 
 
 def build_hotkeys() -> keyboard.GlobalHotKeys:
