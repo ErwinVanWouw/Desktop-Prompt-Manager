@@ -1117,8 +1117,14 @@ class SettingsWindow:
     def _target_label_text(self) -> str:
         if not self.target:
             return "(no app selected)"
-        kind = "Store app" if self.target.get("kind") == "appx" else "program"
-        return f"{self.target.get('label', '?')}  ({kind})"
+        t = self.target
+        if t.get("kind") == "exe":
+            kind = "program"
+        elif "!" in (t.get("aumid") or ""):
+            kind = "Store app"
+        else:
+            kind = "installed app"
+        return f"{t.get('label', '?')}  ({kind})"
 
     def _browse_target(self):
         path = filedialog.askopenfilename(
@@ -1145,7 +1151,7 @@ class SettingsWindow:
         if not choice:
             return
         name, appid = choice
-        if "!" in appid:  # packaged / Store app -> AUMID
+        if "!" in appid:  # packaged / Store app -> resolve exe from manifest
             self.win.config(cursor="watch")
             self.win.update()
             proc = resolve_appx_exe(appid)
@@ -1153,14 +1159,17 @@ class SettingsWindow:
             self.target = {"kind": "appx", "aumid": appid, "proc": proc,
                            "label": name}
         elif appid.lower().endswith(".exe") and (os.sep in appid or "/" in appid):
+            # AppID is a literal executable path.
             self.target = {"kind": "exe", "path": appid,
                            "proc": os.path.basename(appid), "label": name}
         else:
-            messagebox.showinfo(
-                "Desktop Prompt Manager",
-                f"“{name}” isn't a Store app. Use “Browse .exe…” "
-                "to point at its program file instead.", parent=self.win)
-            return
+            # Desktop app registered with an AppUserModelID (e.g. Office) —
+            # launchable via shell:AppsFolder just like a Store app. Pull the
+            # exe name out of the id (e.g. "Microsoft.Office.EXCEL.EXE.15" ->
+            # "EXCEL.EXE") so a running instance can be matched and focused.
+            m = re.search(r"[A-Za-z0-9_-]+\.exe", appid, re.IGNORECASE)
+            self.target = {"kind": "appx", "aumid": appid,
+                           "proc": m.group(0) if m else "", "label": name}
         self.target_label.config(text=self._target_label_text())
 
     def _app_chooser(self, apps):
