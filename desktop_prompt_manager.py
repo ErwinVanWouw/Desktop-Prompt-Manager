@@ -1288,7 +1288,7 @@ class SettingsWindow:
                 "to the focused window as usual.", parent=self.win)
 
         self._persist()
-        messagebox.showinfo("Desktop Prompt Manager", "✅ Prompts saved.", parent=self.win)
+        messagebox.showinfo("Desktop Prompt Manager", "Prompts saved.", parent=self.win)
 
     def _reset(self):
         for key, entry in self.entries.items():
@@ -1309,7 +1309,7 @@ class SettingsWindow:
         if self.on_shortcuts_changed:
             self.on_shortcuts_changed()
         messagebox.showinfo(
-            "Desktop Prompt Manager", "\U0001F504 Prompts reset to defaults.", parent=self.win
+            "Desktop Prompt Manager", "Prompts reset to defaults.", parent=self.win
         )
 
     def _on_close(self):
