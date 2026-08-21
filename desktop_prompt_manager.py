@@ -780,14 +780,11 @@ def build_hotkeys() -> keyboard.GlobalHotKeys:
 # and the desktop shortcut scheme).
 INTRO_PARA_1 = (
     "The trigger prompt fields come pre-configured for translators and text "
-    "editors, but can be fully customized. Enter your prompt in the fields "
-    "below."
+    "editors, but can be fully customized."
 )
 INTRO_PARA_2 = (
-    "By default you trigger each prompt with Ctrl+Shift+F1 to Ctrl+Shift+F10 "
-    "(F-keys rarely clash with the app's own shortcuts). You can change each "
-    "shortcut with the dropdowns next to it. The shortcuts work in any "
-    "application."
+    "By default you trigger each prompt with Ctrl+Shift+F1 to Ctrl+Shift+F10. "
+    "You can change each shortcut with the dropdowns next to it."
 )
 
 
