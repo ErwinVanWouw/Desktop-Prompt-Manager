@@ -68,13 +68,13 @@ DEFAULT_PROMPTS = {
     "prompt1": "Rephrase: ",
     "prompt2": "Correct: ",
     "prompt3": "Translate: ",
-    "prompt4": "Give 3 equivalents for: ",
-    "prompt5": "",
-    "prompt6": "",
-    "prompt7": "",
-    "prompt8": "",
-    "prompt9": "",
-    "prompt10": "",
+    "prompt4": "What does the author mean by: ",
+    "prompt5": "What does the author mean by '' in: ",
+    "prompt6": "Check this grammatically: ",
+    "prompt7": "Check this logically: ",
+    "prompt8": "Check this factually: ",
+    "prompt9": "Give equivalents for: ",
+    "prompt10": "How would you translate '' in: ",
 }
 
 # Default hotkeys in pynput format. F-keys are used because they rarely clash
@@ -779,10 +779,9 @@ def build_hotkeys() -> keyboard.GlobalHotKeys:
 # Intro text mirrored from the original options.html (adapted for 10 prompts
 # and the desktop shortcut scheme).
 INTRO_PARA_1 = (
-    "The first 4 prompts come pre-configured for translators and text editors, "
-    "but can be fully customized. Prompts 5 to 10 are empty by default, but you "
-    "can customize them as needed. Enter your prompt in the fields below; the "
-    "shortcut for each prompt is shown next to it."
+    "The trigger prompt fields come pre-configured for translators and text "
+    "editors, but can be fully customized. Enter your prompt in the fields "
+    "below; the shortcut for each prompt is shown next to it."
 )
 INTRO_PARA_2 = (
     "By default you trigger each prompt with Ctrl+Shift+F1 to Ctrl+Shift+F10 "
