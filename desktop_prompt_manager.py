@@ -781,7 +781,7 @@ def build_hotkeys() -> keyboard.GlobalHotKeys:
 INTRO_PARA_1 = (
     "The trigger prompt fields come pre-configured for translators and text "
     "editors, but can be fully customized. Enter your prompt in the fields "
-    "below; the shortcut for each prompt is shown next to it."
+    "below."
 )
 INTRO_PARA_2 = (
     "By default you trigger each prompt with Ctrl+Shift+F1 to Ctrl+Shift+F10 "
