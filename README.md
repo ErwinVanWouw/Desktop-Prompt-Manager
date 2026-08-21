@@ -58,6 +58,15 @@ it is pasted; sentences, URLs and e-mail addresses are never flagged. Toggle it
 with the **"Warn before pasting text that looks like a password"** checkbox in
 Settings.
 
+## Companion system prompt
+
+The short trigger prompts are only the *cue* – keep the detailed instructions in
+your LLM's **system prompt** (for Claude Desktop, a Project's custom
+instructions). That keeps each message short and cache-friendly instead of
+resending a full prompt every time. See
+[`example-system-prompt.md`](example-system-prompt.md) for a worked example (a
+translator's English > Dutch setup) to adapt to your own workflow.
+
 ## Send to a specific app (target mode)
 
 By default a prompt is pasted into **whatever window is focused** – the app
