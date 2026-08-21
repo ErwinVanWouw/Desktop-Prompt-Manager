@@ -19,7 +19,7 @@ after it), for example:
 - `Rephrase: `
 - `Correct: `
 - `Translate: `
-- `Give equivalents: `
+- `Give equivalents for: `
 - `Check this grammatically: `
 - `Check this logically: `
 - `Check this factually: `
@@ -57,7 +57,7 @@ Check this grammatically/logically/factually: beoordeel (zonder te corrigeren) d
 - logically → zie [logisch] hierboven.
 - factually → klopt de inhoud met de werkelijkheid; gebruik search waar nodig.
 
-Give equivalents: standaard 3 synoniemen/alternatieven, passend bij context en register.
+Give equivalents for: standaard 3 synoniemen/alternatieven, passend bij context en register.
 ```
 
 ## Why the prompts are short (token efficiency)
