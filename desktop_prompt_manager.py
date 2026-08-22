@@ -912,13 +912,24 @@ class SettingsWindow:
                                   state="readonly")
             mod_cb.pack(side="right", padx=(0, 4))
 
-            # Row 2: the prompt text entry
-            entry = tk.Entry(col, font=(UI_FONT, 10), bg=COL_WHITE,
+            # Row 2: the prompt text entry, wrapped in a white frame that
+            # provides the border and a little left padding so the text isn't
+            # flush against the edge (the padding is visual only — it never
+            # becomes part of the prompt value).
+            wrap = tk.Frame(col, bg=COL_WHITE, highlightthickness=2,
+                            highlightbackground=COL_BORDER, highlightcolor=COL_BORDER)
+            wrap.pack(fill="x", pady=(6, 0))
+            entry = tk.Entry(wrap, font=(UI_FONT, 10), bg=COL_WHITE,
                              fg=COL_INPUT_TEXT, relief="flat", bd=0,
-                             highlightthickness=2, highlightbackground=COL_BORDER,
-                             highlightcolor=COL_FOCUS, insertbackground=COL_INPUT_TEXT)
+                             highlightthickness=0, insertbackground=COL_INPUT_TEXT)
             entry.insert(0, prompts.get(key, ""))
-            entry.pack(fill="x", ipady=5, pady=(6, 0))
+            entry.pack(fill="x", padx=(7, 4), ipady=5)
+            # Colour the wrapper border on focus (the Entry, not the frame, gets
+            # keyboard focus, so drive the frame's ring from the Entry's events).
+            entry.bind("<FocusIn>",
+                       lambda e, w=wrap: w.configure(highlightbackground=COL_FOCUS))
+            entry.bind("<FocusOut>",
+                       lambda e, w=wrap: w.configure(highlightbackground=COL_BORDER))
             self.entries[key] = entry
 
         # One-action option: append copied clipboard text after the prompt
