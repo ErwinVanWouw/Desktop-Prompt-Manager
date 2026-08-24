@@ -1036,6 +1036,13 @@ class SettingsWindow:
         helpb.pack(side="left", padx=(15, 0))
         self._add_hover(helpb, COL_WHITE, COL_FG, COL_YELLOW, COL_WHITE)
 
+        # Inline "Saved" confirmation that briefly appears then fades (replaces
+        # the old modal popup).
+        self._status_after = None
+        self._save_status = tk.Label(btns, text="", bg=COL_BG,
+                                     font=(UI_FONT, 9, "bold"))
+        self._save_status.pack(side="left", padx=(15, 0))
+
         # Window footer with Close, matching the Help and About windows. It is
         # hidden while the inline help view is showing (that view has its own
         # "Back to settings" button in the same spot).
@@ -1123,6 +1130,40 @@ class SettingsWindow:
     def _add_hover(widget, bg, fg, hover_bg, hover_fg):
         widget.bind("<Enter>", lambda e: widget.configure(bg=hover_bg, fg=hover_fg))
         widget.bind("<Leave>", lambda e: widget.configure(bg=bg, fg=fg))
+
+    @staticmethod
+    def _lerp_color(a: str, b: str, t: float) -> str:
+        ar, ag, ab = int(a[1:3], 16), int(a[3:5], 16), int(a[5:7], 16)
+        br, bg_, bb = int(b[1:3], 16), int(b[3:5], 16), int(b[5:7], 16)
+        r = round(ar + (br - ar) * t)
+        g = round(ag + (bg_ - ag) * t)
+        bl = round(ab + (bb - ab) * t)
+        return f"#{r:02x}{g:02x}{bl:02x}"
+
+    def _flash_status(self, message: str):
+        """Show a subtle confirmation next to the buttons, then fade it out."""
+        lbl = self._save_status
+        if self._status_after is not None:
+            try:
+                self.win.after_cancel(self._status_after)
+            except Exception:
+                pass
+            self._status_after = None
+        start = "#2e7d32"  # green
+        lbl.config(text=message, fg=start)
+        steps = 6
+
+        def fade(i=0):
+            if not lbl.winfo_exists():
+                return
+            if i >= steps:
+                lbl.config(text="")
+                self._status_after = None
+                return
+            lbl.config(fg=self._lerp_color(start, COL_BG, (i + 1) / steps))
+            self._status_after = self.win.after(70, lambda: fade(i + 1))
+
+        self._status_after = self.win.after(1200, fade)  # hold, then fade
 
     def _target_label_text(self) -> str:
         if not self.target:
@@ -1307,7 +1348,7 @@ class SettingsWindow:
                 "to the focused window as usual.", parent=self.win)
 
         self._persist()
-        messagebox.showinfo("Desktop Prompt Manager", "Prompts saved.", parent=self.win)
+        self._flash_status("Saved ✓")
 
     def _reset(self):
         for key, entry in self.entries.items():
@@ -1327,9 +1368,7 @@ class SettingsWindow:
                     send_to_target=False, target={})
         if self.on_shortcuts_changed:
             self.on_shortcuts_changed()
-        messagebox.showinfo(
-            "Desktop Prompt Manager", "Prompts reset to defaults.", parent=self.win
-        )
+        self._flash_status("Reset to defaults ✓")
 
     def _on_close(self):
         # Closing the window keeps your changes – no need to click Save first.
