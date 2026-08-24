@@ -1,8 +1,8 @@
 """
 Desktop Prompt Manager
 ----------------------
-A local, cross-platform tray app that inserts up to 10 custom prompts into any
-focused application using global keyboard shortcuts.
+A local tray app that inserts up to 10 custom prompts into any focused
+application using global keyboard shortcuts.
 
 Default trigger scheme (each shortcut is customizable in Settings):
     Ctrl+Shift+F1 .. Ctrl+Shift+F10  -> prompt 1 .. 10
