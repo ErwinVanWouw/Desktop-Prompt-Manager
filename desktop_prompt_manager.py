@@ -1415,6 +1415,7 @@ def configure_help_tags(tw: "tk.Text") -> None:
                      spacing1=10, spacing3=4)
     tw.tag_configure("normal", font=(UI_FONT, 10), foreground=COL_FG, spacing3=3)
     tw.tag_configure("b", font=(UI_FONT, 10, "bold"), foreground=COL_FG)
+    tw.tag_configure("i", font=(UI_FONT, 10, "italic"), foreground=COL_FG)
     tw.tag_configure("code", font=("Courier New", 10),
                      background="#e9ecef", foreground="#333333")
     tw.tag_configure("note", font=(UI_FONT, 9, "italic"), foreground="#8a6d00",
@@ -1424,52 +1425,93 @@ def configure_help_tags(tw: "tk.Text") -> None:
 
 
 def _insert_help_inline(tw, s: str, base="normal"):
-    """Insert a line, rendering [text](url) links (as plain text), **bold** and
-    `code` spans."""
+    """Insert a line, rendering [text](url) links (as plain text), **bold**,
+    *italic* and `code` spans."""
     pos = 0
-    for m in re.finditer(r"\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*|`([^`]+?)`", s):
+    pattern = r"\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*|\*([^*]+?)\*|`([^`]+?)`"
+    for m in re.finditer(pattern, s):
         if m.start() > pos:
             tw.insert("end", s[pos:m.start()], (base,))
         if m.group(1) is not None:      # [text](url) -> show only the text
             _insert_help_inline(tw, m.group(1), base)
         elif m.group(3) is not None:    # **bold**
             tw.insert("end", m.group(3), ("b",))
+        elif m.group(4) is not None:    # *italic*
+            tw.insert("end", m.group(4), ("i",))
         else:                            # `code`
-            tw.insert("end", m.group(4), ("code",))
+            tw.insert("end", m.group(5), ("code",))
         pos = m.end()
     if pos < len(s):
         tw.insert("end", s[pos:], (base,))
 
 
 def render_help_markdown(tw: "tk.Text", md: str) -> None:
-    """Render a subset of markdown into a Text widget, then lock it read-only."""
+    """Render a subset of markdown into a Text widget, then lock it read-only.
+
+    Consecutive text lines within a block are reflowed into one paragraph (soft
+    line breaks become spaces, as in real markdown) and the Text widget wraps
+    them; only blank lines, headings, list items and code fences break a block.
+    """
     tw.configure(state="normal")
     tw.delete("1.0", "end")
+
+    state = {"text": None, "tag": "normal"}  # the block being accumulated
+
+    def flush():
+        if state["text"] is None:
+            return
+        if state["tag"] == "bullet":
+            tw.insert("end", "•  ", ("bullet",))
+            _insert_help_inline(tw, state["text"] + "\n", base="bullet")
+        else:
+            _insert_help_inline(tw, state["text"] + "\n", base=state["tag"])
+        state["text"] = None
+        state["tag"] = "normal"
+
     in_code = False
     for raw in md.splitlines():
         if raw.strip().startswith("```"):
+            flush()
             in_code = not in_code
             continue
-        if in_code:
+        if in_code:                                   # code: keep line breaks
             tw.insert("end", raw + "\n", ("code",))
             continue
-        if raw.startswith("# "):
-            tw.insert("end", raw[2:] + "\n", ("h1",))
-        elif raw.startswith("## "):
-            tw.insert("end", raw[3:] + "\n", ("h2",))
-        elif raw.startswith("### "):
-            tw.insert("end", raw[4:] + "\n", ("h3",))
-        elif raw.startswith("> "):
-            _insert_help_inline(tw, raw[2:] + "\n", base="note")
-        elif raw.strip() == "":
+        if raw.startswith(("# ", "## ", "### ")):     # heading
+            flush()
+            level = len(raw) - len(raw.lstrip("#"))
+            tw.insert("end", raw[level + 1:] + "\n", (f"h{level}",))
+            continue
+        if raw.strip() == "":                          # blank -> paragraph gap
+            flush()
             tw.insert("end", "\n")
-        else:
-            m = re.match(r"^(\s*[-*]\s+)(.*)", raw)
-            if m:
-                tw.insert("end", "•  ", ("bullet",))
-                _insert_help_inline(tw, m.group(2) + "\n", base="bullet")
+            continue
+        mb = re.match(r"^\s*[-*]\s+(.*)", raw)          # bulleted list item
+        if mb:
+            flush()
+            state["tag"] = "bullet"
+            state["text"] = mb.group(1)
+            continue
+        if re.match(r"^\s*\d+\.\s+", raw):             # numbered list item
+            flush()
+            state["tag"] = "normal"
+            state["text"] = raw.strip()                # keep the "N." prefix
+            continue
+        if raw.startswith("> "):                        # blockquote / note
+            if state["text"] is not None and state["tag"] == "note":
+                state["text"] += " " + raw[2:]
             else:
-                _insert_help_inline(tw, raw + "\n", base="normal")
+                flush()
+                state["tag"] = "note"
+                state["text"] = raw[2:]
+            continue
+        # plain text: start a paragraph or continue the current block
+        if state["text"] is None:
+            state["tag"] = "normal"
+            state["text"] = raw.strip()
+        else:
+            state["text"] += " " + raw.strip()
+    flush()
     tw.configure(state="disabled")
 
 
