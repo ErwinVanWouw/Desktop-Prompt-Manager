@@ -1424,15 +1424,18 @@ def configure_help_tags(tw: "tk.Text") -> None:
 
 
 def _insert_help_inline(tw, s: str, base="normal"):
-    """Insert a line, rendering **bold** and `code` spans."""
+    """Insert a line, rendering [text](url) links (as plain text), **bold** and
+    `code` spans."""
     pos = 0
-    for m in re.finditer(r"\*\*(.+?)\*\*|`([^`]+?)`", s):
+    for m in re.finditer(r"\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*|`([^`]+?)`", s):
         if m.start() > pos:
             tw.insert("end", s[pos:m.start()], (base,))
-        if m.group(1) is not None:
-            tw.insert("end", m.group(1), ("b",))
-        else:
-            tw.insert("end", m.group(2), ("code",))
+        if m.group(1) is not None:      # [text](url) -> show only the text
+            _insert_help_inline(tw, m.group(1), base)
+        elif m.group(3) is not None:    # **bold**
+            tw.insert("end", m.group(3), ("b",))
+        else:                            # `code`
+            tw.insert("end", m.group(4), ("code",))
         pos = m.end()
     if pos < len(s):
         tw.insert("end", s[pos:], (base,))
