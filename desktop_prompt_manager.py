@@ -2,8 +2,7 @@
 Desktop Prompt Manager
 ----------------------
 A local, cross-platform tray app that inserts up to 10 custom prompts into any
-focused application (Claude Desktop, ChatGPT Desktop, or anything else) using
-global keyboard shortcuts.
+focused application using global keyboard shortcuts.
 
 Default trigger scheme (each shortcut is customizable in Settings):
     Ctrl+Shift+F1 .. Ctrl+Shift+F10  -> prompt 1 .. 10
@@ -51,14 +50,10 @@ APP_AUTHOR = "Black Kite"
 APP_LICENSE = "GNU General Public License v3"
 APP_DESCRIPTION = (
     "A local tray app that inserts up to 10 custom prompts into any focused "
-    "application – such as Claude Desktop and ChatGPT Desktop – using global "
-    "keyboard shortcuts."
+    "application using global keyboard shortcuts."
 )
 
 # --- Update check -----------------------------------------------------------
-# SET THESE to your own URLs. VERSION_CHECK_URL must point to a plain-text file
-# that contains only the latest version number (e.g. "1.2.0"). GITHUB_URL is
-# where users are sent to download a newer version.
 VERSION_CHECK_URL = "https://raw.githubusercontent.com/ErwinVanWouw/Desktop-Prompt-Manager/main/version.txt"
 GITHUB_URL = "https://github.com/ErwinVanWouw/Desktop-Prompt-Manager"
 
@@ -92,8 +87,6 @@ MODIFIER_PRESETS = {
 }
 
 # Keys offered in the Settings dropdown: 0-9, then F1-F12, then A-Z.
-# F-keys come right after the digits so they're easy to find near the top of
-# the list (they rarely clash with an app's own shortcuts).
 KEY_CHOICES = (
     [str(d) for d in range(10)]
     + [f"F{n}" for n in range(1, 13)]
@@ -911,10 +904,7 @@ class SettingsWindow:
                                   state="readonly")
             mod_cb.pack(side="right", padx=(0, 4))
 
-            # Row 2: the prompt text entry, wrapped in a white frame that
-            # provides the border and a little left padding so the text isn't
-            # flush against the edge (the padding is visual only — it never
-            # becomes part of the prompt value).
+            # Row 2: the prompt text entry
             wrap = tk.Frame(col, bg=COL_WHITE, highlightthickness=2,
                             highlightbackground=COL_BORDER, highlightcolor=COL_BORDER)
             wrap.pack(fill="x", pady=(6, 0))
@@ -1036,8 +1026,7 @@ class SettingsWindow:
         helpb.pack(side="left", padx=(15, 0))
         self._add_hover(helpb, COL_WHITE, COL_FG, COL_YELLOW, COL_WHITE)
 
-        # Inline "Saved" confirmation that briefly appears then fades (replaces
-        # the old modal popup).
+        # Inline "Saved" confirmation that briefly appears then fades.
         self._status_after = None
         self._save_status = tk.Label(btns, text="", bg=COL_BG,
                                      font=(UI_FONT, 9, "bold"))
@@ -1737,9 +1726,8 @@ class App:
         self.root = tk.Tk()
         self.root.withdraw()
 
-        # Use the app logo as the window/title-bar icon (replaces the default
-        # Tk feather). Applied to the root as default, so every Toplevel – the
-        # settings window included – inherits it. Keep a reference alive.
+        # Use the app logo as the window/title-bar icon. Applied to the root as default,
+        # so every Toplevel – the settings window included – inherits it. Keep a reference alive.
         try:
             self._icon_photo = ImageTk.PhotoImage(Image.open(resource_path("logo.png")))
             self.root.iconphoto(True, self._icon_photo)
