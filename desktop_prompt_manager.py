@@ -5,7 +5,8 @@ A local tray app that inserts up to 10 custom prompts into any focused
 application using global keyboard shortcuts.
 
 Default trigger scheme (each shortcut is customizable in Settings):
-    Ctrl+Shift+F1 .. Ctrl+Shift+F10  -> prompt 1 .. 10
+    Ctrl+Shift+F1 .. F9  -> prompt 1 .. 9
+    Ctrl+F10             -> prompt 10  (Ctrl+Shift+F10 is a Windows shortcut)
 
 How it works: on a hotkey it copies the stored prompt to the clipboard and
 simulates a paste (Ctrl+V, or Cmd+V on macOS) into whatever window is focused.
@@ -75,6 +76,9 @@ DEFAULT_PROMPTS = {
 # Default hotkeys in pynput format. F-keys are used because they rarely clash
 # with the target app's own shortcuts (e.g. Claude Desktop).
 DEFAULT_SHORTCUTS = {f"prompt{i}": f"<ctrl>+<shift>+<f{i}>" for i in range(1, 11)}
+# Ctrl+Shift+F10 collides with Windows' Shift+F10 (context menu), so prompt 10
+# uses Ctrl+F10 by default instead.
+DEFAULT_SHORTCUTS["prompt10"] = "<ctrl>+<f10>"
 
 # Modifier presets offered in the Settings dropdown -> pynput tokens.
 MODIFIER_PRESETS = {
@@ -775,7 +779,8 @@ INTRO_PARA_1 = (
     "box and click the 'Save Prompts' button."
 )
 INTRO_PARA_2 = (
-    "By default you trigger each prompt with Ctrl+Shift+F1 to Ctrl+Shift+F10. "
+    "By default you trigger prompts with Ctrl+Shift+F1 to F9, and Ctrl+F10 for "
+    "prompt 10. "
     "You can change each shortcut with the dropdowns next to it."
 )
 
@@ -1382,7 +1387,7 @@ FALLBACK_HELP = (
     "# Desktop Prompt Manager\n\n"
     "Insert up to 10 custom prompts into any focused app with global shortcuts.\n\n"
     "## Shortcuts\n"
-    "Default: Ctrl+Shift+F1..F10 for prompts 1-10. "
+    "Default: Ctrl+Shift+F1..F9 for prompts 1-9 and Ctrl+F10 for prompt 10. "
     "Change them per prompt in Settings.\n\n"
     "## One-action instructing\n"
     "Copy a snippet, press a shortcut, and the prompt is inserted with your "

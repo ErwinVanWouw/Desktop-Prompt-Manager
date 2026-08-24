@@ -6,7 +6,8 @@ of the original browser extension.
 
 ## Shortcuts
 
-The default shortcut combinations are `Ctrl+Shift+F1-F10` but these can be customized.
+The default shortcuts are `Ctrl+Shift+F1` to `F9`, and `Ctrl+F10` for prompt 10
+(`Ctrl+Shift+F10` is a Windows system shortcut). All can be customized.
 Function keys are default because they rarely clash with the target app's own shortcuts.
 In Settings each prompt has two dropdowns – a modifier preset (e.g. Ctrl+Shift, Ctrl+Alt)
 and a key (0–9, F1–F12, A–Z) – so you can reassign any shortcut.
