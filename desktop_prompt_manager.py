@@ -776,11 +776,10 @@ def build_hotkeys() -> keyboard.GlobalHotKeys:
 # Settings window (Tkinter)
 # --------------------------------------------------------------------------- #
 
-# Intro text mirrored from the original options.html (adapted for 10 prompts
-# and the desktop shortcut scheme).
 INTRO_PARA_1 = (
     "The trigger prompt fields come pre-configured for translators and text "
-    "editors, but can be fully customized."
+    "editors, but can be fully customized. Just enter your prompt in the text "
+    "box and click the 'Save Prompts' button."
 )
 INTRO_PARA_2 = (
     "By default you trigger each prompt with Ctrl+Shift+F1 to Ctrl+Shift+F10. "
