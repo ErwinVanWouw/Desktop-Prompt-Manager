@@ -1422,6 +1422,10 @@ def configure_help_tags(tw: "tk.Text") -> None:
                      lmargin1=12, lmargin2=12, spacing3=3)
     tw.tag_configure("bullet", font=(UI_FONT, 10), foreground=COL_FG,
                      lmargin1=12, lmargin2=26, spacing3=3)
+    # Style spans carry both the base tag (for margins) and a style tag (for the
+    # font); raise the style tags so their font wins over the base tag's font.
+    for style in ("b", "i", "code"):
+        tw.tag_raise(style)
 
 
 def _insert_help_inline(tw, s: str, base="normal"):
@@ -1432,14 +1436,17 @@ def _insert_help_inline(tw, s: str, base="normal"):
     for m in re.finditer(pattern, s):
         if m.start() > pos:
             tw.insert("end", s[pos:m.start()], (base,))
+        # Keep the base tag on every span so its left margin (e.g. a bullet's
+        # hanging indent) still applies when a line wraps inside a styled run;
+        # the style tag only adds the font (it is raised above the base tags).
         if m.group(1) is not None:      # [text](url) -> show only the text
             _insert_help_inline(tw, m.group(1), base)
         elif m.group(3) is not None:    # **bold**
-            tw.insert("end", m.group(3), ("b",))
+            tw.insert("end", m.group(3), (base, "b"))
         elif m.group(4) is not None:    # *italic*
-            tw.insert("end", m.group(4), ("i",))
+            tw.insert("end", m.group(4), (base, "i"))
         else:                            # `code`
-            tw.insert("end", m.group(5), ("code",))
+            tw.insert("end", m.group(5), (base, "code"))
         pos = m.end()
     if pos < len(s):
         tw.insert("end", s[pos:], (base,))
