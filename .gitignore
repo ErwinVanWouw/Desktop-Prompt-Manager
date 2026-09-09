@@ -9,6 +9,8 @@ venv/
 build/
 dist/
 *.spec
+# Built executable kept at the repo root (for the startup shortcut)
+/DesktopPromptManager.exe
 
 # OS cruft
 Thumbs.db
