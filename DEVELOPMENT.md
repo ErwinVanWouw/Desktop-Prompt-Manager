@@ -22,13 +22,22 @@ A tray icon appears. Right-click it for **Settings** (edit the 10 prompts) and
 
 ```bash
 pip install pyinstaller
-pyinstaller --onefile --windowed --name "DesktopPromptManager" --add-data "logo.png;." --add-data "README.md;." desktop_prompt_manager.py
+pyinstaller --onefile --noupx --noconsole --name "DesktopPromptManager" --version-file=version_info.txt --icon="logo.ico" --add-data "logo.png;." --add-data "README.md;." --hidden-import pystray._win32 --collect-submodules PIL --collect-submodules pynput desktop_prompt_manager.py
 ```
 
-(on macOS/Linux use `:` instead of `;` in `--add-data`, e.g. `"logo.png:."`.)
+What the flags do:
 
-`logo.png` is used for the tray/window icon and `README.md` powers the in-app
-**Help** window, so both are bundled into the executable.
+- `--onefile --noconsole` – one self-contained windowed `.exe`, no console.
+- `--noupx` – skip UPX compression (fewer antivirus false positives).
+- `--icon="logo.ico"` – the executable's file icon (regenerate from `logo.png`
+  with `Image.open('logo.png').save('logo.ico', sizes=[(16,16),(32,32),(48,48),(256,256)])`).
+- `--version-file=version_info.txt` – version/author metadata shown in the
+  file's Properties. Keep its version numbers in sync with `APP_VERSION`.
+- `--add-data "logo.png;." --add-data "README.md;."` – `logo.png` is the
+  tray/window icon and `README.md` powers the in-app Help, so both are bundled.
+- `--hidden-import pystray._win32 --collect-submodules PIL --collect-submodules pynput`
+  – make sure the tray, imaging and global-hotkey backends are included
+  (PyInstaller can otherwise miss them, causing a silent startup crash).
 
 The result is `dist/DesktopPromptManager.exe`. Colleagues can run it directly.
 
