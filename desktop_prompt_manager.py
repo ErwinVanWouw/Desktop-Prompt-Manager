@@ -70,7 +70,7 @@ DEFAULT_PROMPTS = {
     "prompt7": "Check this logically: ",
     "prompt8": "Check this factually: ",
     "prompt9": "Give equivalents for: ",
-    "prompt10": "How would you translate '' in: ",
+    "prompt10": '"{}"',
 }
 
 # Default hotkeys in pynput format. F-keys are used because they rarely clash
@@ -606,6 +606,19 @@ def _combine(prompt: str, extra: str) -> str:
     return prompt + extra
 
 
+# A prompt may contain this placeholder to mark where the grabbed text goes.
+PLACEHOLDER = "{}"
+
+
+def _compose(prompt: str, extra: str, append: bool) -> str:
+    """Build the text to paste. If the prompt contains the {} placeholder, the
+    grabbed text is substituted there (e.g. '"{}"' -> '"<selection>"'); otherwise
+    the text is appended after the prompt when append is on."""
+    if PLACEHOLDER in prompt:
+        return prompt.replace(PLACEHOLDER, extra)
+    return _combine(prompt, extra) if append else prompt
+
+
 def _insert_prompt(text: str, append_clipboard: bool = True,
                    password_warning: bool = True, target=None) -> None:
     if not text:
@@ -622,12 +635,13 @@ def _insert_prompt(text: str, append_clipboard: bool = True,
         except Exception:
             saved_clip = ""
 
-        # Auto-copy the current selection (only meaningful if we append it).
-        # If nothing is selected now (e.g. a correction after focus already
-        # moved here), reuse the selection grabbed by the previous press.
-        selection = _select_for_target() if append_clipboard else ""
+        # Auto-copy the current selection when we either append it or need it
+        # for a {} placeholder. If nothing is selected now (e.g. a correction
+        # after focus already moved here), reuse the previous press's selection.
+        needs_text = append_clipboard or (PLACEHOLDER in text)
+        selection = _select_for_target() if needs_text else ""
 
-        if append_clipboard and password_warning and looks_like_password(selection):
+        if password_warning and looks_like_password(selection):
             if _confirm_hook is not None and not _confirm_hook(mask_secret(selection)):
                 try:
                     pyperclip.copy(saved_clip)
@@ -635,7 +649,7 @@ def _insert_prompt(text: str, append_clipboard: bool = True,
                     pass
                 return
 
-        combined = _combine(text, selection) if append_clipboard else text
+        combined = _compose(text, selection, append_clipboard)
 
         if not _activate_target(target):
             _notify("Could not open the target app:\n\n"
@@ -676,13 +690,14 @@ def _insert_prompt(text: str, append_clipboard: bool = True,
 
     # If we're about to paste copied clipboard text and it looks like a
     # password/secret, ask the user before it leaves the clipboard.
-    if append_clipboard and password_warning and looks_like_password(original):
+    if (append_clipboard or PLACEHOLDER in text) and password_warning \
+            and looks_like_password(original):
         if _confirm_hook is not None:
             if not _confirm_hook(mask_secret(original)):
                 return  # user declined; clipboard is left untouched
             refocus = True  # the dialog stole focus from the target app
 
-    combined = _combine(text, original) if append_clipboard else text
+    combined = _compose(text, original, append_clipboard)
     pyperclip.copy(combined)
     # Give the clipboard a moment to settle.
     time.sleep(0.03)

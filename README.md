@@ -32,6 +32,11 @@ restores your original clipboard so repeated triggers stay clean. Turn this off 
 **"Append copied text after the prompt"** checkbox in Settings if you ever want the prompt
 on its own.
 
+A prompt may also contain a `{}` placeholder; your text is then inserted *there*
+instead of appended at the end. The default for prompt 10 is `"{}"`, which simply
+wraps your selection in quotes &ndash; handy for staging a sentence and asking a
+short question about it, e.g. `"…the selected sentence…"` followed by *which one?*
+
 ### Password safety net
 
 Because the one-action feature pastes whatever you last copied, the app can warn you if
