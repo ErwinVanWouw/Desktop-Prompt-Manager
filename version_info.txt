@@ -3,8 +3,8 @@
 # Keep the version numbers in sync with APP_VERSION in desktop_prompt_manager.py.
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 0, 0),
-    prodvers=(1, 0, 0, 0),
+    filevers=(1, 0, 1, 0),
+    prodvers=(1, 0, 1, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -19,12 +19,12 @@ VSVersionInfo(
         [
           StringStruct('CompanyName', 'Black Kite'),
           StringStruct('FileDescription', 'Desktop Prompt Manager for Translators'),
-          StringStruct('FileVersion', '1.0.0'),
+          StringStruct('FileVersion', '1.0.1'),
           StringStruct('InternalName', 'DesktopPromptManager'),
           StringStruct('LegalCopyright', 'Black Kite - GNU General Public License v3'),
           StringStruct('OriginalFilename', 'DesktopPromptManager.exe'),
           StringStruct('ProductName', 'Desktop Prompt Manager for Translators'),
-          StringStruct('ProductVersion', '1.0.0')
+          StringStruct('ProductVersion', '1.0.1')
         ])
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
