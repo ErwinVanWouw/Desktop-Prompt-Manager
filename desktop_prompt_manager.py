@@ -613,8 +613,19 @@ PLACEHOLDER = "{}"
 def _compose(prompt: str, extra: str, append: bool) -> str:
     """Build the text to paste. If the prompt contains the {} placeholder, the
     grabbed text is substituted there (e.g. '"{}"' -> '"<selection>"'); otherwise
-    the text is appended after the prompt when append is on."""
+    the text is appended after the prompt when append is on.
+
+    When the placeholder is wrapped in a quote in the template and the grabbed
+    text is already wrapped in that same quote, the text's outer pair is dropped
+    so the quotes aren't doubled (e.g. '"{}"' + '"x"' -> '"x"', not '""x""').
+    """
     if PLACEHOLDER in prompt:
+        i = prompt.index(PLACEHOLDER)
+        lq = prompt[i - 1] if i > 0 else ""
+        rq = prompt[i + len(PLACEHOLDER)] if i + len(PLACEHOLDER) < len(prompt) else ""
+        if lq in ('"', "'") and rq == lq and len(extra) >= 2 \
+                and extra[0] == lq and extra[-1] == lq:
+            extra = extra[1:-1]
         return prompt.replace(PLACEHOLDER, extra)
     return _combine(prompt, extra) if append else prompt
 
