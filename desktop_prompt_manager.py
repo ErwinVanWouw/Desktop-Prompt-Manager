@@ -626,7 +626,13 @@ def _compose(prompt: str, extra: str, append: bool) -> str:
         if lq in ('"', "'") and rq == lq and len(extra) >= 2 \
                 and extra[0] == lq and extra[-1] == lq:
             extra = extra[1:-1]
-        return prompt.replace(PLACEHOLDER, extra)
+        result = prompt.replace(PLACEHOLDER, extra)
+        # Add a trailing space so the user can keep typing without the text
+        # bumping against the closing quote (prompts are stored stripped, so
+        # this can't live in the template itself).
+        if not result.endswith((" ", "\t", "\n")):
+            result += " "
+        return result
     return _combine(prompt, extra) if append else prompt
 
 
