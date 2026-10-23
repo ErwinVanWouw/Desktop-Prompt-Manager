@@ -46,7 +46,7 @@ from PIL import Image, ImageDraw, ImageTk
 
 APP_NAME = "DesktopPromptManager"
 APP_TITLE = "Desktop Prompt Manager for Translators"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 APP_AUTHOR = "Black Kite"
 APP_LICENSE = "GNU General Public License v3"
 APP_DESCRIPTION = (
