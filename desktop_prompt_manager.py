@@ -285,6 +285,24 @@ def save_config(prompts: dict, append_clipboard=None, shortcuts=None,
 
 _kbd = keyboard.Controller()
 
+# Modifier keys that may still be physically held when a hotkey fires. They are
+# released before we simulate Ctrl+C / Ctrl+A / Ctrl+V, otherwise a held Alt
+# (e.g. an Alt+Shift+F10 shortcut) turns our Ctrl+C into Alt+Ctrl+C and the copy
+# silently fails.
+_MODIFIER_NAMES = ("ctrl", "ctrl_l", "ctrl_r", "shift", "shift_l", "shift_r",
+                   "alt", "alt_l", "alt_r", "alt_gr")
+
+
+def _release_modifiers() -> None:
+    for name in _MODIFIER_NAMES:
+        k = getattr(keyboard.Key, name, None)
+        if k is None:
+            continue
+        try:
+            _kbd.release(k)
+        except Exception:
+            pass
+
 # Set by the GUI so a background paste can ask the user for confirmation.
 # Signature: confirm(masked_preview: str) -> bool. None means "no GUI, allow".
 _confirm_hook = None
@@ -497,12 +515,7 @@ def _grab_selection() -> str:
     selected at the moment the shortcut fired.
     """
     mod = keyboard.Key.cmd if sys.platform == "darwin" else keyboard.Key.ctrl
-    for key in (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r,
-                keyboard.Key.shift, keyboard.Key.shift_r):
-        try:
-            _kbd.release(key)
-        except Exception:
-            pass
+    _release_modifiers()
     try:
         pyperclip.copy("")
     except Exception:
@@ -719,16 +732,9 @@ def _insert_prompt(text: str, append_clipboard: bool = True,
     # Give the clipboard a moment to settle.
     time.sleep(0.03)
 
-    # The hotkey modifiers (Ctrl+Shift) are still physically held when the
-    # callback fires. Release them so our simulated shortcuts aren't mangled.
-    for key in (
-        keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r,
-        keyboard.Key.shift, keyboard.Key.shift_r,
-    ):
-        try:
-            _kbd.release(key)
-        except Exception:
-            pass
+    # The hotkey modifiers are still physically held when the callback fires.
+    # Release them (incl. Alt) so our simulated Ctrl+A / Ctrl+V aren't mangled.
+    _release_modifiers()
 
     time.sleep(0.03)
 
